@@ -333,6 +333,28 @@ export default function Home() {
             <p className="text-gray-600">予算の設定と管理</p>
           </Link>
         </div>
+
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-bold text-gray-800">ホーム</h1>
+          <Link
+            href="/account"
+            className="text-blue-500 hover:text-blue-600 flex items-center"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 mr-2"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                clipRule="evenodd"
+              />
+            </svg>
+            アカウント
+          </Link>
+        </div>
       </div>
     </main>
   );
