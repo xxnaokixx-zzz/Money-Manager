@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
+import Link from 'next/link';
 
 export default function Account() {
   const router = useRouter();
@@ -132,7 +133,12 @@ export default function Account() {
     <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       <div className="max-w-md mx-auto px-4 py-12">
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h1 className="text-2xl font-bold text-gray-800 mb-6">アカウント情報</h1>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-2xl font-bold text-gray-800">アカウント情報</h1>
+            <Link href="/" className="text-blue-500 hover:text-blue-600">
+              ← ホームに戻る
+            </Link>
+          </div>
 
           {error && (
             <div className="bg-red-50 text-red-500 p-4 rounded-md mb-4">
