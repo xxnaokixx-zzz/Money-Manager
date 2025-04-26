@@ -32,8 +32,12 @@ export default function Account() {
             .eq('id', user.id)
             .single();
 
-          if (profileError) throw profileError;
-          setProfile(profileData);
+          if (profileError) {
+            console.error('Error fetching profile:', profileError);
+            throw profileError;
+          } else {
+            setProfile(profileData);
+          }
         }
       } catch (err) {
         console.error('Error fetching user data:', err);
@@ -89,10 +93,15 @@ export default function Account() {
       console.log('Public URL:', publicUrl);
 
       // プロフィールを更新
-      const { error: updateError } = await supabase
+      const { data: updatedProfile, error: updateError } = await supabase
         .from('users')
-        .update({ avatar_url: publicUrl })
-        .eq('id', user.id);
+        .update({
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id)
+        .select()
+        .single();
 
       if (updateError) {
         console.error('Update error:', updateError);
@@ -100,7 +109,7 @@ export default function Account() {
       }
 
       // プロフィール情報を更新
-      setProfile({ ...profile, avatar_url: publicUrl });
+      setProfile(updatedProfile);
     } catch (err: any) {
       console.error('Error uploading image:', err);
       setError(err.message || '画像のアップロードに失敗しました');
@@ -152,6 +161,8 @@ export default function Account() {
                   alt="プロフィール画像"
                   className="rounded-full object-cover"
                   fill
+                  sizes="96px"
+                  priority
                 />
               ) : (
                 <div className="w-full h-full rounded-full bg-gray-200 flex items-center justify-center">
@@ -190,7 +201,7 @@ export default function Account() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">名前</label>
+              <label className="block text-sm font-medium text-gray-700">ユーザー名</label>
               <p className="mt-1 text-gray-900">{profile?.name || '未設定'}</p>
             </div>
 

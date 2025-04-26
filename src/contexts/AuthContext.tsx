@@ -6,9 +6,9 @@ import { supabase } from '@/lib/supabase';
 
 interface Profile {
   id: string;
-  username: string;
+  name: string;
   avatar_url: string | null;
-  updated_at: string;
+  created_at: string;
 }
 
 interface AuthContextType {
@@ -80,29 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // プロフィールが存在しない場合は新規作成
-          const { data: newProfile, error: createError } = await supabase
-            .from('users')
-            .insert([
-              {
-                id: userId,
-                username: '',
-                avatar_url: null,
-                updated_at: new Date().toISOString()
-              }
-            ])
-            .select()
-            .single();
-
-          if (createError) {
-            console.error('Error creating profile:', createError);
-          } else {
-            setProfile(newProfile);
-          }
-        } else {
-          console.error('Error fetching profile:', error);
-        }
+        console.error('Error fetching profile:', error);
       } else {
         setProfile(data);
       }

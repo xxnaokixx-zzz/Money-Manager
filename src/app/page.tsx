@@ -7,6 +7,7 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Chart.jsの初期化
 ChartJS.register(ArcElement, Tooltip, Legend);
@@ -46,6 +47,7 @@ interface Profile {
   id: string;
   username: string;
   avatar_url?: string | null;
+  name: string;
 }
 
 // キャッシュ用の型定義
@@ -77,6 +79,8 @@ export default function Home() {
     description: ''
   });
   const router = useRouter();
+  const { user, profile: authProfile } = useAuth();
+  console.log('Auth Profile:', authProfile);
 
   // 型を明示的に定義
   interface CategoryExpenses {
@@ -457,7 +461,14 @@ export default function Home() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">予算状況</h2>
+            <h2 className="text-lg font-semibold text-gray-800">
+              予算状況
+              {authProfile && (
+                <span className="ml-2 text-sm text-gray-500">
+                  ({authProfile.name}さん)
+                </span>
+              )}
+            </h2>
             <div className="flex space-x-2">
               <Link
                 href="/budget"
