@@ -1,11 +1,18 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Header() {
   const { user, profile } = useAuth();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const menuItems = [
     { href: '/transactions', label: '取引履歴' },
@@ -14,66 +21,132 @@ export default function Header() {
     { href: '/salary', label: '給料設定' },
   ];
 
+  // クライアントサイドでのみレンダリング
+  if (!mounted) {
+    return (
+      <header className="bg-white shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-8">
+            <Link href="/" className="text-xl font-bold text-gray-800">
+              Money App
+            </Link>
+          </div>
+          <div className="flex items-center">
+            <div className="w-8 h-8 rounded-full bg-gray-200" />
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="bg-white shadow-sm">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        <div className="flex items-center space-x-8">
+        <div className="flex items-center space-x-4">
+          {user && (
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="md:hidden p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200"
+              aria-label="メニューを開く"
+            >
+              <svg
+                className="w-6 h-6 text-gray-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                {isMenuOpen ? (
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                ) : (
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                )}
+              </svg>
+            </button>
+          )}
           <Link href="/" className="text-xl font-bold text-gray-800">
             Money App
           </Link>
-
-          {user && (
-            <nav className="hidden md:flex items-center space-x-6">
-              {menuItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="text-gray-600 hover:text-gray-900"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          )}
         </div>
 
-        <div className="flex items-center">
-          {user ? (
-            <Link href="/account" className="flex items-center">
-              <div className="w-8 h-8 relative rounded-full overflow-hidden">
+        <div className="flex items-center space-x-8">
+          {user && (
+            <>
+              {/* デスクトップ用ナビゲーション */}
+              <nav className="hidden md:flex items-center space-x-6">
+                {menuItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="text-gray-600 hover:text-gray-900"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            </>
+          )}
+
+          <div className="flex items-center space-x-4">
+            {user ? (
+              <Link href="/account" className="flex items-center space-x-2">
                 {profile?.avatar_url ? (
-                  <Image
-                    src={profile.avatar_url}
-                    alt="プロフィール"
-                    fill
-                    className="object-cover"
-                  />
+                  <div className="relative w-8 h-8">
+                    <Image
+                      src={profile.avatar_url}
+                      alt="アバター"
+                      fill
+                      sizes="32px"
+                      className="rounded-full object-cover"
+                      priority
+                    />
+                  </div>
                 ) : (
-                  <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                    <svg
-                      className="w-5 h-5 text-gray-400"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                      />
-                    </svg>
+                  <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                    <span className="text-gray-600">
+                      {profile?.username?.[0] || '?'}
+                    </span>
                   </div>
                 )}
-              </div>
-            </Link>
-          ) : (
-            <Link href="/login" className="text-gray-600 hover:text-gray-900">
-              ログイン
-            </Link>
-          )}
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="text-blue-500 hover:text-blue-600"
+              >
+                ログイン
+              </Link>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* モバイル用ドロップダウンメニュー */}
+      {isMenuOpen && user && (
+        <div className="md:hidden bg-white border-t">
+          <nav className="px-4 py-2">
+            {menuItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="block py-3 text-gray-600 hover:text-gray-900 border-b last:border-b-0"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      )}
     </header>
   );
 } 
