@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
 import Link from 'next/link';
+import InviteForm from '@/components/InviteForm';
 
 export default function Account() {
   const router = useRouter();
@@ -215,6 +216,8 @@ export default function Account() {
             </button>
           </div>
         </div>
+
+        <InviteForm />
       </div>
     </main>
   );
