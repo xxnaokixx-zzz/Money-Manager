@@ -675,6 +675,22 @@ export default function Home() {
           </table>
         </div>
       </div>
+
+      {/* グループ機能カード */}
+      <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">グループ機能</h2>
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            友達や家族と一緒に家計簿を管理できます。グループを作成して、共同で支出を管理しましょう。
+          </p>
+          <Link
+            href="/groups/create"
+            className="inline-block w-full bg-blue-500 text-white py-2 px-4 rounded-md text-center hover:bg-blue-600 transition-colors"
+          >
+            グループを作成
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
