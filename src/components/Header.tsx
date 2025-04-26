@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function Header() {
+  const router = useRouter();
   const { user, profile } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -19,7 +21,13 @@ export default function Header() {
     { href: '/add', label: '新規記録' },
     { href: '/budget', label: '予算管理' },
     { href: '/salary', label: '給料設定' },
+    { href: '/groups/new', label: 'グループ作成' },
   ];
+
+  const handleNavigation = (href: string) => {
+    setIsMenuOpen(false);
+    router.push(href);
+  };
 
   // クライアントサイドでのみレンダリング
   if (!mounted) {
@@ -73,9 +81,12 @@ export default function Header() {
               </svg>
             </button>
           )}
-          <Link href="/" className="text-xl font-bold text-gray-800">
+          <button
+            onClick={() => handleNavigation('/')}
+            className="text-xl font-bold text-gray-800 hover:text-gray-900"
+          >
             Money App
-          </Link>
+          </button>
         </div>
 
         <div className="flex items-center space-x-8">
@@ -84,13 +95,13 @@ export default function Header() {
               {/* デスクトップ用ナビゲーション */}
               <nav className="hidden md:flex items-center space-x-6">
                 {menuItems.map((item) => (
-                  <Link
+                  <button
                     key={item.href}
-                    href={item.href}
+                    onClick={() => handleNavigation(item.href)}
                     className="text-gray-600 hover:text-gray-900"
                   >
                     {item.label}
-                  </Link>
+                  </button>
                 ))}
               </nav>
             </>
@@ -98,7 +109,10 @@ export default function Header() {
 
           <div className="flex items-center space-x-4">
             {user ? (
-              <Link href="/account" className="flex items-center space-x-2">
+              <button
+                onClick={() => handleNavigation('/account')}
+                className="flex items-center space-x-2"
+              >
                 {profile?.avatar_url ? (
                   <div className="relative w-8 h-8">
                     <Image
@@ -117,14 +131,14 @@ export default function Header() {
                     </span>
                   </div>
                 )}
-              </Link>
+              </button>
             ) : (
-              <Link
-                href="/login"
+              <button
+                onClick={() => handleNavigation('/login')}
                 className="text-blue-500 hover:text-blue-600"
               >
                 ログイン
-              </Link>
+              </button>
             )}
           </div>
         </div>
@@ -135,14 +149,13 @@ export default function Header() {
         <div className="md:hidden bg-white border-t">
           <nav className="px-4 py-2">
             {menuItems.map((item) => (
-              <Link
+              <button
                 key={item.href}
-                href={item.href}
-                className="block py-3 text-gray-600 hover:text-gray-900 border-b last:border-b-0"
-                onClick={() => setIsMenuOpen(false)}
+                onClick={() => handleNavigation(item.href)}
+                className="block w-full text-left py-3 text-gray-600 hover:text-gray-900 border-b last:border-b-0"
               >
                 {item.label}
-              </Link>
+              </button>
             ))}
           </nav>
         </div>

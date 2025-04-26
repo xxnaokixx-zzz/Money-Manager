@@ -17,56 +17,72 @@ interface Transaction {
 export default function TransactionsPage() {
   const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const [totalIncome, setTotalIncome] = useState(0);
   const [totalExpense, setTotalExpense] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchTransactions();
-  }, [selectedMonth]);
+    let isMounted = true;
 
-  const fetchTransactions = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
+    const fetchData = async () => {
+      if (!isMounted) return;
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/login');
+          return;
+        }
+
+        // 選択された月の最初の日と最後の日を計算
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const lastDay = new Date(year, month, 0).getDate();
+        const firstDay = `${selectedMonth}-01`;
+        const lastDayStr = `${selectedMonth}-${lastDay.toString().padStart(2, '0')}`;
+
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('date', firstDay)
+          .lte('date', lastDayStr)
+          .order('date', { ascending: false });
+
+        if (!isMounted) return;
+
+        if (error) throw error;
+
+        setTransactions(data || []);
+        const income = data?.filter(t => t.type === 'income')
+          .reduce((sum, t) => sum + t.amount, 0) || 0;
+        const expense = data?.filter(t => t.type === 'expense')
+          .reduce((sum, t) => sum + t.amount, 0) || 0;
+
+        setTotalIncome(income);
+        setTotalExpense(expense);
+      } catch (error) {
+        if (!isMounted) return;
+        console.error('Error fetching transactions:', error);
+        setError('取引履歴の取得に失敗しました');
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
+    };
 
-      // 選択された月の最初の日と最後の日を計算
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const lastDay = new Date(year, month, 0).getDate(); // 月の最後の日を取得
-      const firstDay = `${selectedMonth}-01`;
-      const lastDayStr = `${selectedMonth}-${lastDay.toString().padStart(2, '0')}`;
+    fetchData();
 
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('date', firstDay)
-        .lte('date', lastDayStr)
-        .order('date', { ascending: false });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedMonth, router]);
 
-      if (error) throw error;
-
-      setTransactions(data || []);
-
-      // 収入と支出の合計を計算
-      const income = data?.filter(t => t.type === 'income')
-        .reduce((sum, t) => sum + t.amount, 0) || 0;
-      const expense = data?.filter(t => t.type === 'expense')
-        .reduce((sum, t) => sum + t.amount, 0) || 0;
-
-      setTotalIncome(income);
-      setTotalExpense(expense);
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      setError('取引履歴の取得に失敗しました');
-    } finally {
-      setLoading(false);
-    }
+  const handleNavigation = (href: string) => {
+    setIsLoading(true);
+    router.push(href);
   };
 
   const handleDelete = async (id: number) => {
@@ -86,7 +102,7 @@ export default function TransactionsPage() {
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center">
         <p>読み込み中...</p>
@@ -98,29 +114,21 @@ export default function TransactionsPage() {
     <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="mb-8">
-          <Link
-            href="/"
-            className="inline-flex items-center text-blue-500 hover:text-blue-600 mb-4"
-          >
-            <svg
-              className="w-5 h-5 mr-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            ホームに戻る
-          </Link>
           <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-800">取引履歴</h1>
-            <Link
-              href="/add"
+            <div className="flex items-center">
+              <button
+                onClick={() => handleNavigation('/')}
+                className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors mr-4"
+              >
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7m-9 2v8m4-8v8m-4 0h4" />
+                </svg>
+                ホームに戻る
+              </button>
+              <h1 className="text-2xl font-bold text-gray-800">取引履歴</h1>
+            </div>
+            <button
+              onClick={() => handleNavigation('/add')}
               className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
             >
               <svg
@@ -137,7 +145,7 @@ export default function TransactionsPage() {
                 />
               </svg>
               新規記録
-            </Link>
+            </button>
           </div>
         </div>
 
