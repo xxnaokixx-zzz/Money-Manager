@@ -14,6 +14,11 @@ export default function Account() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -24,6 +29,10 @@ export default function Account() {
 
         if (user) {
           setUser(user);
+          setFormData({
+            name: '',
+            email: user.email || '',
+          });
 
           // プロフィール情報を取得
           const { data: profileData, error: profileError } = await supabase
@@ -37,6 +46,10 @@ export default function Account() {
             throw profileError;
           } else {
             setProfile(profileData);
+            setFormData(prev => ({
+              ...prev,
+              name: profileData.name || '',
+            }));
           }
         }
       } catch (err) {
@@ -115,6 +128,51 @@ export default function Account() {
       setError(err.message || '画像のアップロードに失敗しました');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setError(null);
+      setLoading(true);
+
+      // 名前の更新
+      const { error: profileError } = await supabase
+        .from('users')
+        .update({
+          name: formData.name,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      // メールアドレスの更新
+      if (formData.email !== user.email) {
+        const { error: emailError } = await supabase.auth.updateUser({
+          email: formData.email
+        });
+
+        if (emailError) throw emailError;
+      }
+
+      // プロフィール情報を更新
+      setProfile((prev: any) => ({
+        ...prev,
+        name: formData.name
+      }));
+      setUser((prev: any) => ({
+        ...prev,
+        email: formData.email
+      }));
+      setIsEditing(false);
+      alert('プロフィールを更新しました');
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
+      setError(err.message || 'プロフィールの更新に失敗しました');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -199,24 +257,73 @@ export default function Account() {
             </button>
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">ユーザー名</label>
-              <p className="mt-1 text-gray-900">{profile?.name || '未設定'}</p>
-            </div>
+          {isEditing ? (
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">ユーザー名</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700">メールアドレス</label>
-              <p className="mt-1 text-gray-900">{user?.email}</p>
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">メールアドレス</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  required
+                />
+              </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700">アカウント作成日</label>
-              <p className="mt-1 text-gray-900">
-                {new Date(user?.created_at).toLocaleDateString('ja-JP')}
-              </p>
+              <div className="flex space-x-4">
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600"
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(false)}
+                  className="flex-1 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">ユーザー名</label>
+                <p className="mt-1 text-gray-900">{profile?.name || '未設定'}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">メールアドレス</label>
+                <p className="mt-1 text-gray-900">{user?.email}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">アカウント作成日</label>
+                <p className="mt-1 text-gray-900">
+                  {new Date(user?.created_at).toLocaleDateString('ja-JP')}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setIsEditing(true)}
+                className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600"
+              >
+                プロフィールを編集
+              </button>
             </div>
-          </div>
+          )}
 
           <div className="mt-8">
             <button

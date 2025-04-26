@@ -113,7 +113,7 @@ export default function Header() {
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
                     <span className="text-gray-600">
-                      {profile?.username?.[0] || '?'}
+                      {profile?.name?.[0] || '?'}
                     </span>
                   </div>
                 )}
