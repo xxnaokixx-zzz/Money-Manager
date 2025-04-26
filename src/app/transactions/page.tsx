@@ -21,6 +21,7 @@ export default function TransactionsPage() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const [totalIncome, setTotalIncome] = useState(0);
   const [totalExpense, setTotalExpense] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTransactions();
@@ -34,15 +35,18 @@ export default function TransactionsPage() {
         return;
       }
 
-      const startDate = `${selectedMonth}-01`;
-      const endDate = `${selectedMonth}-31`;
+      // 選択された月の最初の日と最後の日を計算
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate(); // 月の最後の日を取得
+      const firstDay = `${selectedMonth}-01`;
+      const lastDayStr = `${selectedMonth}-${lastDay.toString().padStart(2, '0')}`;
 
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
         .eq('user_id', user.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
+        .gte('date', firstDay)
+        .lte('date', lastDayStr)
         .order('date', { ascending: false });
 
       if (error) throw error;
@@ -59,6 +63,7 @@ export default function TransactionsPage() {
       setTotalExpense(expense);
     } catch (error) {
       console.error('Error fetching transactions:', error);
+      setError('取引履歴の取得に失敗しました');
     } finally {
       setLoading(false);
     }

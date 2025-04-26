@@ -1,14 +1,21 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 
 // Chart.jsの初期化
 ChartJS.register(ArcElement, Tooltip, Legend);
+
+// 遅延読み込みするコンポーネント
+const DoughnutChart = dynamic(() => import('@/components/DoughnutChart'), {
+  loading: () => <div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>,
+  ssr: false
+});
 
 interface Transaction {
   id: number;
@@ -41,6 +48,18 @@ interface Profile {
   avatar_url?: string | null;
 }
 
+// キャッシュ用の型定義
+interface CacheData {
+  transactions: Transaction[];
+  budgets: Budget[];
+  salary: Salary | null;
+  profile: Profile | null;
+  timestamp: number;
+}
+
+// キャッシュの有効期限（5分）
+const CACHE_EXPIRY = 5 * 60 * 1000;
+
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
@@ -50,6 +69,13 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [ownerInfo, setOwnerInfo] = useState<{ name: string; type: string } | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
+  const [newTransaction, setNewTransaction] = useState({
+    type: 'expense',
+    amount: 0,
+    category: '',
+    date: new Date().toISOString().split('T')[0],
+    description: ''
+  });
   const router = useRouter();
 
   // 型を明示的に定義
@@ -87,127 +113,80 @@ export default function Home() {
     };
   }, [transactions]);
 
+  // キャッシュの初期化
+  const [cache, setCache] = useState<CacheData | null>(null);
+
   const fetchData = useCallback(async () => {
     try {
+      setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
         return;
       }
 
-      console.log('Current user ID:', user.id);
+      // データ取得を並列実行
+      const [transactionsData, budgetsData, salaryData, profileData] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('date', `${selectedMonth}-01`)
+          .lte('date', new Date(new Date(`${selectedMonth}-01`).getFullYear(), new Date(`${selectedMonth}-01`).getMonth() + 1, 0).toISOString().split('T')[0])
+          .order('date', { ascending: false }),
+        supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', user.id),
+        supabase
+          .from('salaries')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle()
+      ]);
 
-      // プロフィール情報の取得
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+      if (transactionsData.error) throw transactionsData.error;
+      if (budgetsData.error) throw budgetsData.error;
+      if (salaryData.error && salaryData.error.code !== 'PGRST116') throw salaryData.error;
+      if (profileData.error && profileData.error.code !== 'PGRST116') throw profileData.error;
 
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.error('Error fetching profile:', profileError);
-        return;
-      }
+      setTransactions(transactionsData.data || []);
 
-      if (!profileData) {
-        try {
-          // プロフィールが存在しない場合は新規作成
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .insert([
-              {
-                id: user.id,
-                username: 'あなた'
-              }
-            ])
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('Error creating profile:', insertError);
-            // プロフィール作成に失敗した場合でも、デフォルトのユーザー名を使用
-            setOwnerInfo({
-              name: 'あなた',
-              type: '個人'
-            });
-            return;
-          }
-
-          setProfile(newProfile);
-          setOwnerInfo({
-            name: newProfile.username || 'あなた',
-            type: '個人'
-          });
-        } catch (error) {
-          console.error('Unexpected error creating profile:', error);
-          // エラーが発生した場合でも、デフォルトのユーザー名を使用
-          setOwnerInfo({
-            name: 'あなた',
-            type: '個人'
-          });
-        }
-      } else {
-        setProfile(profileData);
-        setOwnerInfo({
-          name: profileData.username || 'あなた',
-          type: '個人'
-        });
-      }
-
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('date', `${selectedMonth}-01`)
-        .lte('date', new Date(new Date(`${selectedMonth}-01`).getFullYear(), new Date(`${selectedMonth}-01`).getMonth() + 1, 0).toISOString().split('T')[0])
-        .order('date', { ascending: false });
-
-      if (transactionsError) {
-        console.error('Error fetching transactions:', transactionsError);
-        return;
-      }
-
-      console.log('取引データ:', transactionsData); // デバッグ用ログ
-      setTransactions(transactionsData || []);
-
-      const { data: budgetsData, error: budgetsError } = await supabase
-        .from('budgets')
-        .select('*')
-        .eq('user_id', user.id);
-
-      if (budgetsError) {
-        console.error('Error fetching budgets:', budgetsError);
-        return;
-      }
-
-      console.log('予算データ:', budgetsData); // デバッグ用ログ
-
-      // category_idに基づいてカテゴリー名を設定
-      const processedBudgets = budgetsData?.map(budget => {
-        console.log('予算のカテゴリーID:', budget.category_id); // デバッグ用ログ
+      const processedBudgets = budgetsData.data?.map(budget => {
+        const categoryId = budget.category_id || 4;
         return {
           ...budget,
-          category: getCategoryName(budget.category_id)
+          category: getCategoryName(categoryId)
         };
       }) || [];
-
-      console.log('処理後の予算データ:', processedBudgets); // デバッグ用ログ
       setBudgets(processedBudgets);
 
-      const { data: salaryData, error: salaryError } = await supabase
-        .from('salaries')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (salaryError && salaryError.code !== 'PGRST116') {
-        console.error('Error fetching salary:', salaryError);
-        return;
+      setSalary(salaryData.data);
+      if (salaryData.data) {
+        await checkAndAddSalary(salaryData.data);
       }
 
-      setSalary(salaryData);
-      if (salaryData) {
-        await checkAndAddSalary(salaryData);
+      if (!profileData.data) {
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert([{ id: user.id, username: 'あなた' }])
+          .select()
+          .single();
+
+        if (insertError) {
+          setOwnerInfo({ name: 'あなた', type: '個人' });
+        } else {
+          setProfile(newProfile);
+          setOwnerInfo({ name: newProfile.username || 'あなた', type: '個人' });
+        }
+      } else {
+        setProfile(profileData.data);
+        setOwnerInfo({ name: profileData.data.username || 'あなた', type: '個人' });
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -215,6 +194,22 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }, [router, selectedMonth]);
+
+  // 初期データ取得
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // リンクのプリフェッチ
+  useEffect(() => {
+    const prefetchLinks = async () => {
+      const links = ['/budget', '/budget/history', '/transactions'];
+      for (const link of links) {
+        await router.prefetch(link);
+      }
+    };
+    prefetchLinks();
   }, [router]);
 
   const checkAndAddSalary = useCallback(async (salary: Salary): Promise<void> => {
@@ -292,23 +287,110 @@ export default function Home() {
     }
   }, [router, fetchData]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
-  const chartData = useMemo(() => ({
-    labels: ['使用済み', '残り'],
-    datasets: [
-      {
-        data: [
-          totalExpense,
-          budgets.length > 0 ? Math.max(0, budgets[0].amount - totalExpense) : Math.max(0, totalIncome - totalExpense)
-        ],
-        backgroundColor: ['#EF4444', '#10B981'],
-        borderWidth: 0,
-      },
-    ],
-  }), [totalExpense, budgets, totalIncome]);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      const transactionData = {
+        type: newTransaction.type,
+        amount: newTransaction.amount || 0,
+        category: newTransaction.category,
+        date: newTransaction.date,
+        description: newTransaction.description,
+        user_id: user.id
+      };
+
+      const { error } = await supabase
+        .from('transactions')
+        .insert([transactionData]);
+
+      if (error) throw error;
+
+      // 収入の場合、予算を更新
+      if (newTransaction.type === 'income') {
+        const { data: currentBudget } = await supabase
+          .from('budgets')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (currentBudget) {
+          const { error: budgetError } = await supabase
+            .from('budgets')
+            .update({ amount: currentBudget.amount + newTransaction.amount })
+            .eq('id', currentBudget.id);
+
+          if (budgetError) throw budgetError;
+        } else {
+          // 予算が存在しない場合は新規作成
+          const { error: budgetError } = await supabase
+            .from('budgets')
+            .insert([{
+              amount: newTransaction.amount,
+              user_id: user.id
+            }]);
+
+          if (budgetError) throw budgetError;
+        }
+      }
+
+      setNewTransaction({
+        type: 'expense',
+        amount: 0,
+        category: '',
+        date: new Date().toISOString().split('T')[0],
+        description: ''
+      });
+      fetchData();
+    } catch (error) {
+      console.error('Error adding transaction:', error);
+      setError('取引の追加に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (salary) {
+      checkAndAddSalary(salary);
+    }
+  }, [salary, checkAndAddSalary]);
+
+  const chartData = useMemo(() => {
+    const initialBudget = budgets.length > 0 ? budgets[0].amount : 0;
+    const currentTotal = initialBudget + totalIncome - totalExpense; // 現在の合計額
+
+    // 予算額(initialBudget)を下回っている分を計算
+    const amountBelowBudget = Math.max(0, initialBudget - currentTotal);
+    const amountWithinBudget = totalExpense - amountBelowBudget;
+
+    return {
+      labels: ['予算割れ分', '使用済み', '残り'],
+      datasets: [
+        {
+          data: [
+            currentTotal < initialBudget ? amountBelowBudget : 0,
+            amountWithinBudget,
+            Math.max(0, currentTotal)
+          ],
+          backgroundColor: [
+            '#EF4444',  // 予算額を下回った分は赤
+            '#10B981',  // 予算内は緑
+            '#10B981'   // 残りは緑
+          ],
+          borderWidth: 0,
+        },
+      ],
+    };
+  }, [totalExpense, budgets, totalIncome]);
 
   const chartOptions = useMemo(() => ({
     cutout: '70%',
@@ -320,11 +402,14 @@ export default function Home() {
         enabled: false,
       },
     },
+    rotation: 0, // 開始位置を12時の位置に修正
   }), []);
 
   // カテゴリーIDからカテゴリー名を取得する関数
-  const getCategoryName = (categoryId: number): string => {
-    console.log('Getting category name for ID:', categoryId); // デバッグ用ログ
+  const getCategoryName = (categoryId: number | undefined): string => {
+    if (categoryId === undefined) return '未分類';
+
+    console.log('Getting category name for ID:', categoryId);
     switch (categoryId) {
       case 1:
         return '食費';
@@ -335,15 +420,24 @@ export default function Home() {
       case 4:
         return 'その他';
       default:
-        console.log('Unknown category ID:', categoryId); // デバッグ用ログ
+        console.log('Unknown category ID:', categoryId);
         return '未分類';
     }
   };
 
+  // ナビゲーションの最適化
+  const handleNavigation = useCallback((path: string) => {
+    setLoading(true);
+    router.push(path);
+  }, [router]);
+
+  // ローディング状態の改善
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="text-slate-800">読み込み中...</div>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
       </div>
     );
   }
@@ -368,6 +462,10 @@ export default function Home() {
               <Link
                 href="/budget"
                 className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigation('/budget');
+                }}
               >
                 <svg
                   className="w-4 h-4 mr-1"
@@ -385,8 +483,12 @@ export default function Home() {
                 編集
               </Link>
               <Link
-                href="/budget/history"
+                href="/transactions"
                 className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigation('/transactions');
+                }}
               >
                 <svg
                   className="w-4 h-4 mr-1"
@@ -412,11 +514,13 @@ export default function Home() {
           ) : (
             <div className="flex flex-col items-center">
               <div className="relative w-48 h-48 mb-4">
-                <Doughnut data={chartData} options={chartOptions} />
+                <Suspense fallback={<div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>}>
+                  <DoughnutChart data={chartData} options={chartOptions} />
+                </Suspense>
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-gray-800">
-                      ¥{Math.max(0, budgets[0].amount - totalExpense).toLocaleString()}
+                      ¥{Math.max(0, (budgets[0].amount + totalIncome - totalExpense)).toLocaleString()}
                     </div>
                     <div className="text-sm text-gray-600">
                       残り
@@ -425,16 +529,32 @@ export default function Home() {
                 </div>
               </div>
               <div className="space-y-2 w-full">
-                {Object.entries(categoryExpenses).map(([category, amount]) => (
-                  <div key={category} className="flex justify-between text-sm">
-                    <span className="font-medium">{category}</span>
-                    <span className="text-gray-600">
-                      <span className="text-red-500">¥{amount.toLocaleString()}</span>
-                      <span className="mx-1">/</span>
-                      <span className="text-blue-500">¥{budgets[0].amount.toLocaleString()}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">予算額</span>
+                  <span className="text-gray-600">
+                    ¥{budgets[0].amount.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">収入</span>
+                  <span className="text-emerald-600">
+                    +¥{totalIncome.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">支出</span>
+                  <span className="text-red-500">
+                    -¥{totalExpense.toLocaleString()}
+                  </span>
+                </div>
+                <div className="border-t border-slate-200 pt-2 mt-2">
+                  <div className="flex justify-between text-sm font-medium">
+                    <span>利用可能額</span>
+                    <span className="text-blue-600">
+                      ¥{(budgets[0].amount + totalIncome - totalExpense).toLocaleString()}
                     </span>
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           )}
