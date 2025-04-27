@@ -21,6 +21,7 @@ export default function Header() {
     { href: '/add', label: '新規記録' },
     { href: '/budget', label: '予算管理' },
     { href: '/salary', label: '給料設定' },
+    { href: '/groups', label: 'グループ一覧' },
     { href: '/groups/new', label: 'グループ作成' },
   ];
 

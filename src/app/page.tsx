@@ -126,6 +126,7 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
+        setLoading(false);
         return;
       }
 
@@ -684,7 +685,7 @@ export default function Home() {
             友達や家族と一緒に家計簿を管理できます。グループを作成して、共同で支出を管理しましょう。
           </p>
           <Link
-            href="/groups/create"
+            href="/groups/new"
             className="inline-block w-full bg-blue-500 text-white py-2 px-4 rounded-md text-center hover:bg-blue-600 transition-colors"
           >
             グループを作成

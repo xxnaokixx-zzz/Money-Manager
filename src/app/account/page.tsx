@@ -22,6 +22,7 @@ export default function Account() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchUserData = async () => {
       try {
         const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -51,16 +52,22 @@ export default function Account() {
               name: profileData.name || '',
             }));
           }
+        } else {
+          setUser(null);
+          setProfile(null);
         }
       } catch (err) {
         console.error('Error fetching user data:', err);
         setError('ユーザー情報の取得に失敗しました');
+        setUser(null);
+        setProfile(null);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchUserData();
+    return () => { isMounted = false; };
   }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,6 +191,30 @@ export default function Account() {
     } catch (err) {
       console.error('Error signing out:', err);
       setError('ログアウトに失敗しました');
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm('本当にアカウントを削除しますか？この操作は元に戻せません。')) return;
+    try {
+      setError(null);
+      setLoading(true);
+      // サーバーサイドAPI経由でユーザー削除
+      const response = await fetch('/api/delete-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'アカウントの削除に失敗しました');
+      // ログアウト処理
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch (err: any) {
+      console.error('Error deleting account:', err);
+      setError(err.message || 'アカウントの削除に失敗しました');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -331,6 +362,12 @@ export default function Account() {
               className="w-full bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600"
             >
               ログアウト
+            </button>
+            <button
+              onClick={handleDeleteAccount}
+              className="w-full bg-red-700 text-white py-2 px-4 rounded-md hover:bg-red-800 mt-4"
+            >
+              アカウントを削除
             </button>
           </div>
         </div>

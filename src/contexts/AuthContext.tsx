@@ -29,13 +29,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // セッションと認証状態の初期化
-
+    let isMounted = true;
     async function initializeAuth() {
       try {
-        // 現在のセッションを取得
         const { data: { session } } = await supabase.auth.getSession();
-
+        if (!isMounted) return;
         if (session?.user) {
           setUser(session.user);
           await fetchProfile(session.user.id);
@@ -44,15 +42,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(null);
         }
       } catch (error) {
-        console.error('Error initializing auth:', error);
+        if (isMounted) {
+          setUser(null);
+          setProfile(null);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
-    // 認証状態の変更を監視
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        if (!isMounted) return;
         if (session?.user) {
           setUser(session.user);
           await fetchProfile(session.user.id);
@@ -65,8 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     initializeAuth();
-
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -78,14 +79,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .select()
         .eq('id', userId)
         .single();
-
       if (error) {
-        console.error('Error fetching profile:', error);
+        setProfile(null);
       } else {
         setProfile(data);
       }
     } catch (error) {
-      console.error('Error in fetchProfile:', error);
+      setProfile(null);
     }
   };
 

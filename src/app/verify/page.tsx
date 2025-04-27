@@ -20,6 +20,7 @@ export default function Verify() {
         if (session?.user) {
           // ユーザーが認証済みの場合はホーム画面にリダイレクト
           router.push('/');
+          setLoading(false);
           return;
         }
 

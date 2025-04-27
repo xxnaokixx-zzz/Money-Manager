@@ -33,6 +33,7 @@ export default function BudgetPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
           router.push('/login');
+          if (isMounted) setLoading(false);
           return;
         }
 
@@ -52,9 +53,7 @@ export default function BudgetPage() {
         console.error('Error fetching budgets:', error);
         setError('予算の取得に失敗しました');
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
 

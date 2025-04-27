@@ -24,17 +24,20 @@ export default function InvitePage({ params }: { params: { token: string } }) {
 
         if (!data) {
           setError('招待が見つかりません');
+          setLoading(false);
           return;
         }
 
         if (data.status !== 'pending') {
           setError('この招待は既に使用されています');
+          setLoading(false);
           return;
         }
 
         const expiresAt = new Date(data.expires_at);
         if (expiresAt < new Date()) {
           setError('この招待は期限切れです');
+          setLoading(false);
           return;
         }
 
