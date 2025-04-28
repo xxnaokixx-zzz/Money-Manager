@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { uploadAvatar } from '@/lib/supabase';
+import { uploadAvatar } from '@/lib/supabase-browser';
 import { useState } from 'react';
 import Image from 'next/image';
 

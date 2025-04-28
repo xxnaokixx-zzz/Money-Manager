@@ -2,9 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+
+interface GroupMember {
+  user_id: string;
+  name: string;
+  role: string;
+}
 
 interface Group {
   id: number;
@@ -12,7 +18,7 @@ interface Group {
   description: string;
   created_at: string;
   created_by: string | null;
-  members: string[];
+  members: GroupMember[];
 }
 
 export default function GroupsPage() {
@@ -91,6 +97,9 @@ export default function GroupsPage() {
     );
   }
 
+  console.log('user:', user);
+  console.log('user.id:', user?.id);
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       <div className="max-w-4xl mx-auto px-4 py-8">
@@ -157,15 +166,25 @@ export default function GroupsPage() {
               </div>
               <div className="mb-2">
                 <span className="text-sm font-medium text-gray-700">メンバー:</span>
-                {group.members.length > 0 ? (
+                {Array.isArray(group.members) && group.members.length > 0 ? (
                   <ul className="list-disc list-inside text-gray-600 mt-1">
                     {group.members.map((member, idx) => (
-                      <li key={idx}>{member}</li>
+                      <li key={member.user_id}>
+                        {member.name}（{member.role === 'owner' ? '管理者' : 'メンバー'}）
+                      </li>
                     ))}
                   </ul>
                 ) : (
                   <span className="text-gray-400 ml-2">メンバーなし</span>
                 )}
+                <div className="mt-2">
+                  <Link
+                    href={`/groups/${group.id}/members/new`}
+                    className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 text-sm"
+                  >
+                    メンバーを追加
+                  </Link>
+                </div>
               </div>
               {group.description && (
                 <p className="text-gray-600 mb-4">

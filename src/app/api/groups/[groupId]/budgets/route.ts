@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request, props: { params: Promise<{ groupId: string }> }) {
   const params = await props.params;
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -67,7 +68,8 @@ export async function POST(request: Request, props: { params: Promise<{ groupId:
 export async function GET(request: Request, props: { params: Promise<{ groupId: string }> }) {
   const params = await props.params;
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -122,7 +124,8 @@ export async function GET(request: Request, props: { params: Promise<{ groupId: 
 export async function DELETE(request: Request, props: { params: Promise<{ groupId: string }> }) {
   const params = await props.params;
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

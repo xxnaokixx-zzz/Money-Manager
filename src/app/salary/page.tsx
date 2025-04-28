@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase-browser';
 import Link from 'next/link';
 
 interface Salary {
@@ -69,6 +69,23 @@ export default function SalaryPage() {
           router.push('/login');
           return;
         }
+        const { data: groups, error: groupError } = await supabase
+          .from('groups')
+          .select(`
+            id,
+            name,
+            description,
+            created_at,
+            created_by,
+            members:group_members(
+              user_id,
+              role
+            )
+          `)
+          .eq('created_by', user.id);
+
+        if (groupError) throw groupError;
+
         const { error } = await supabase
           .from('salaries')
           .insert([{

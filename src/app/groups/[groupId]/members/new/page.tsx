@@ -12,7 +12,7 @@ export default function NewMemberPage(
   const params = use(props.params);
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'member' | 'admin'>('member');
+  const [role, setRole] = useState<'member'>('member');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,11 +90,10 @@ export default function NewMemberPage(
             <select
               id="role"
               value={role}
-              onChange={(e) => setRole(e.target.value as 'member' | 'admin')}
+              onChange={(e) => setRole(e.target.value as 'member')}
               className="w-full p-2 border rounded-md"
             >
               <option value="member">メンバー</option>
-              <option value="admin">管理者</option>
             </select>
             <p className="text-sm text-gray-500 mt-1">
               管理者は予算や取引の追加・編集ができます
