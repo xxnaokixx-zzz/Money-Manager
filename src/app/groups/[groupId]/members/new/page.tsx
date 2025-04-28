@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-export default function NewMemberPage({
-  params,
-}: {
-  params: { groupId: string };
-}) {
+export default function NewMemberPage(
+  props: {
+    params: Promise<{ groupId: string }>;
+  }
+) {
+  const params = use(props.params);
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'member' | 'admin'>('member');

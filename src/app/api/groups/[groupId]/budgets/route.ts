@@ -2,10 +2,8 @@ import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 
-export async function POST(
-  request: Request,
-  { params }: { params: { groupId: string } }
-) {
+export async function POST(request: Request, props: { params: Promise<{ groupId: string }> }) {
+  const params = await props.params;
   try {
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { user } } = await supabase.auth.getUser();
@@ -66,10 +64,8 @@ export async function POST(
   }
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: { groupId: string } }
-) {
+export async function GET(request: Request, props: { params: Promise<{ groupId: string }> }) {
+  const params = await props.params;
   try {
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { user } } = await supabase.auth.getUser();
@@ -123,10 +119,8 @@ export async function GET(
   }
 }
 
-export async function DELETE(
-  request: Request,
-  { params }: { params: { groupId: string } }
-) {
+export async function DELETE(request: Request, props: { params: Promise<{ groupId: string }> }) {
+  const params = await props.params;
   try {
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { user } } = await supabase.auth.getUser();

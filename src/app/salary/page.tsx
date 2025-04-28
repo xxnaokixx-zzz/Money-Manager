@@ -64,12 +64,18 @@ export default function SalaryPage() {
         if (error) throw error;
       } else {
         // 新規給料情報を作成
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/login');
+          return;
+        }
         const { error } = await supabase
           .from('salaries')
           .insert([{
             amount: parseInt(amount),
             payday: parseInt(payday),
-            last_paid: new Date().toISOString().split('T')[0]
+            last_paid: new Date().toISOString().split('T')[0],
+            user_id: user.id
           }]);
 
         if (error) throw error;
