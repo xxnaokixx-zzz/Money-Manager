@@ -77,8 +77,8 @@ export default function BudgetPage() {
         if (!budgetData && totalIncome === 0) {
           setEditedAmount('');  // 予算も収入もない場合は空文字列
         } else {
-          const currentAmount = (budgetData?.amount || 0) + totalIncome;
-          setEditedAmount(String(currentAmount));
+          // 予算額のみを表示（収入は含めない）
+          setEditedAmount(String(budgetData?.amount || 0));
         }
 
       } catch (error) {
@@ -103,6 +103,8 @@ export default function BudgetPage() {
   };
 
   const handleEdit = () => {
+    // 予算額のみを表示（収入は含めない）
+    setEditedAmount(budget ? String(budget.amount) : '');
     setIsEditing(true);
   };
 
@@ -114,21 +116,68 @@ export default function BudgetPage() {
         return;
       }
 
-      const { error: upsertError } = await supabase
-        .from('budgets')
-        .upsert({
-          user_id: user.id,
-          month: `${selectedMonth}-01`,
-          amount: Number(editedAmount)
-        });
+      // 給料による収入を取得
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const currentMonthStart = `${selectedMonth}-01`;
+      const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
 
-      if (upsertError) throw upsertError;
+      const { data: salaryData, error: salaryError } = await supabase
+        .from('transactions')
+        .select('amount')
+        .eq('user_id', user.id)
+        .eq('type', 'income')
+        .eq('category_id', 1) // 給与カテゴリー
+        .gte('date', currentMonthStart)
+        .lte('date', currentMonthEnd);
+
+      if (salaryError) throw salaryError;
+
+      const totalSalary = salaryData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+      const baseBudget = Number(editedAmount);
+
+      if (baseBudget < 0) {
+        throw new Error('予算額は0以上である必要があります');
+      }
+
+      // 既存の予算を確認
+      const { data: existingBudget, error: checkError } = await supabase
+        .from('budgets')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('month', `${selectedMonth}-01`)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        throw checkError;
+      }
+
+      if (existingBudget) {
+        // 既存の予算を更新
+        const { error: updateError } = await supabase
+          .from('budgets')
+          .update({ amount: baseBudget })
+          .eq('id', existingBudget.id);
+
+        if (updateError) throw updateError;
+      } else {
+        // 新規予算を作成
+        const { error: insertError } = await supabase
+          .from('budgets')
+          .insert({
+            user_id: user.id,
+            month: `${selectedMonth}-01`,
+            amount: baseBudget
+          });
+
+        if (insertError) throw insertError;
+      }
 
       setBudget({
-        id: budget?.id || 0,
+        id: existingBudget?.id || 0,
         user_id: user.id,
         month: `${selectedMonth}-01`,
-        amount: Number(editedAmount)
+        amount: baseBudget
       });
       setIsEditing(false);
       alert('予算が更新されました');
@@ -221,9 +270,23 @@ export default function BudgetPage() {
                   />
                 ) : (
                   <div className="w-full pl-8 p-3 border rounded-md text-base bg-gray-50">
-                    {editedAmount && (budget || totalIncome > 0) ? Number(editedAmount).toLocaleString() : '未設定'}
+                    {budget ? Number(budget.amount).toLocaleString() : '未設定'}
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-md">
+              <div className="text-sm text-gray-600 mb-2">今月の収入</div>
+              <div className="text-lg font-medium text-emerald-600">
+                ¥{totalIncome.toLocaleString()}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 p-4 rounded-md">
+              <div className="text-sm text-gray-600 mb-2">利用可能額</div>
+              <div className="text-lg font-medium text-blue-600">
+                ¥{((budget?.amount || 0) + totalIncome).toLocaleString()}
               </div>
             </div>
 

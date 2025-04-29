@@ -40,74 +40,88 @@ export default function GroupBudgetPage(props: { params: Promise<{ groupId: stri
           return;
         }
 
-        // グループメンバーであることを確認
-        const { data: member, error: memberError } = await supabase
+        console.log('Debug - User:', user.id);
+        console.log('Debug - Group ID:', params.groupId);
+
+        console.log('Debug - Checking membership:', {
+          userId: user.id,
+          groupId: Number(params.groupId)
+        });
+
+        // まず全てのグループメンバーを取得して確認
+        const { data: allMembers, error: allMembersError } = await supabase
+          .from('group_members')
+          .select('*')
+          .eq('group_id', Number(params.groupId));
+
+        console.log('Debug - All members for group:', allMembers);
+        console.log('Debug - All members error:', allMembersError);
+
+        // 次に特定のユーザーのメンバーシップを確認
+        const { data: groupMember, error: memberError } = await supabase
           .from('group_members')
           .select('role')
-          .eq('group_id', params.groupId)
+          .eq('group_id', Number(params.groupId))
           .eq('user_id', user.id)
           .single();
 
-        if (memberError) {
-          throw new Error('グループメンバーではありません');
-        }
+        console.log('Debug - Member check:', { groupMember, memberError });
 
-        // 予算を取得
-        const { data: budgetData, error: budgetError } = await supabase
-          .from('group_budgets')
+        // グループ情報も取得して確認
+        const { data: groupData, error: groupError } = await supabase
+          .from('groups')
           .select('*')
-          .eq('group_id', params.groupId)
-          .eq('month', `${selectedMonth}-01`)
+          .eq('id', Number(params.groupId))
           .single();
 
-        if (budgetError && budgetError.code !== 'PGRST116') {
-          throw budgetError;
+        console.log('Debug - Group data:', groupData);
+        console.log('Debug - Group error:', groupError);
+
+        if (memberError) {
+          if (memberError.code === 'PGRST116') {
+            console.error('Debug - Member not found');
+
+            // グループが存在し、かつ作成者である場合
+            if (!groupError && groupData && groupData.created_by === user.id) {
+              console.log('Debug - User is group creator, adding as member');
+
+              // 作成者の場合、group_membersテーブルに追加
+              const { data: insertedMember, error: insertError } = await supabase
+                .from('group_members')
+                .insert({
+                  group_id: Number(params.groupId),
+                  user_id: user.id,
+                  role: 'owner'
+                })
+                .select()
+                .single();
+
+              console.log('Debug - Insert result:', { insertedMember, insertError });
+
+              if (insertError) {
+                console.error('Debug - Error inserting member:', insertError);
+                throw new Error('グループメンバーの登録に失敗しました');
+              }
+
+              // 挿入されたメンバー情報を使用
+              if (insertedMember) {
+                return insertedMember.role;
+              }
+            } else {
+              console.log('Debug - User is not group creator');
+              throw new Error('グループメンバーではありません');
+            }
+          } else {
+            console.error('Debug - Member error:', memberError);
+            throw new Error('グループメンバーの確認中にエラーが発生しました');
+          }
         }
 
-        // この月の収入（給与含む）を取得
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const lastDay = new Date(year, month, 0).getDate();
-        const currentMonthStart = `${selectedMonth}-01`;
-        const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-        // グループメンバーの給与を取得
-        const { data: salaryData, error: salaryError } = await supabase
-          .from('transactions')
-          .select('amount')
-          .eq('group_id', params.groupId)
-          .eq('type', 'income')
-          .eq('category_id', 1)  // 給与カテゴリー
-          .gte('date', currentMonthStart)
-          .lte('date', currentMonthEnd);
-
-        if (salaryError) throw salaryError;
-
-        // その他の収入を取得
-        const { data: incomeData, error: incomeError } = await supabase
-          .from('transactions')
-          .select('amount')
-          .eq('group_id', params.groupId)
-          .eq('type', 'income')
-          .neq('category_id', 1)  // 給与以外
-          .gte('date', currentMonthStart)
-          .lte('date', currentMonthEnd);
-
-        if (incomeError) throw incomeError;
-
-        // 総収入を計算（給与 + その他の収入）
-        const totalSalary = salaryData?.reduce((sum, t) => sum + t.amount, 0) || 0;
-        const totalOtherIncome = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
-        const totalIncome = totalSalary + totalOtherIncome;
-        setTotalIncome(totalIncome);
-
-        // 予算データを設定
-        setBudget(budgetData);
-        if (!budgetData && totalIncome === 0) {
-          setEditedAmount('');
-        } else {
-          const currentAmount = (budgetData?.amount || 0) + totalIncome;
-          setEditedAmount(String(currentAmount));
+        if (!groupMember) {
+          throw new Error('グループメンバー情報の取得に失敗しました');
         }
+
+        return groupMember.role;
 
       } catch (error) {
         if (!isMounted) return;
@@ -142,31 +156,48 @@ export default function GroupBudgetPage(props: { params: Promise<{ groupId: stri
         return;
       }
 
+      console.log('Checking group membership for user:', user.id);
+
       // グループメンバーであることを確認
-      const { data: member, error: memberError } = await supabase
+      const { data: groupMember, error: memberError } = await supabase
         .from('group_members')
         .select('role')
-        .eq('group_id', params.groupId)
+        .eq('group_id', Number(params.groupId))
         .eq('user_id', user.id)
         .single();
 
+      console.log('Debug - Group data:', groupMember);
+
       if (memberError) {
+        console.error('Debug - Member error:', memberError);
         throw new Error('グループメンバーではありません');
       }
 
-      if (member.role !== 'owner') {
+      if (groupMember.role !== 'owner') {
+        console.log('User role is not owner:', groupMember.role);
         throw new Error('予算の編集はグループ管理者のみ可能です');
       }
+
+      console.log('Updating budget:', {
+        group_id: Number(params.groupId),
+        month: `${selectedMonth}-01`,
+        amount: Number(editedAmount)
+      });
 
       const { error: upsertError } = await supabase
         .from('group_budgets')
         .upsert({
-          group_id: params.groupId,
+          group_id: Number(params.groupId),
           month: `${selectedMonth}-01`,
           amount: Number(editedAmount)
         });
 
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        console.error('Budget update error:', upsertError);
+        throw upsertError;
+      }
+
+      console.log('Budget updated successfully');
 
       setBudget({
         id: budget?.id || 0,
@@ -302,7 +333,7 @@ export default function GroupBudgetPage(props: { params: Promise<{ groupId: stri
                           const { error: transactionError } = await supabase
                             .from('transactions')
                             .delete()
-                            .eq('group_id', params.groupId)
+                            .eq('group_id', Number(params.groupId))
                             .eq('type', 'income')
                             .eq('category_id', 1) // 給与カテゴリー
                             .gte('date', currentMonthStart)

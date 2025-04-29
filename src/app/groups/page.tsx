@@ -172,9 +172,12 @@ export default function GroupsPage() {
                 <span className="text-sm font-medium text-gray-700">メンバー:</span>
                 {Array.isArray(group.members) && group.members.length > 0 ? (
                   <ul className="list-disc list-inside text-gray-600 mt-1">
-                    {group.members.map((member, idx) => (
-                      <li key={member.user_id}>
-                        {member.name}（{member.role === 'owner' ? '管理者' : 'メンバー'}）
+                    {group.members.map((member) => (
+                      <li key={member.user_id} className="text-sm">
+                        {member.name || 'Unknown'}
+                        {member.role === 'owner' && (
+                          <span className="ml-1 text-xs text-blue-600">(管理者)</span>
+                        )}
                       </li>
                     ))}
                   </ul>

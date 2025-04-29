@@ -30,26 +30,29 @@ export async function GET() {
       console.log(`Processing salary: Amount=${salary.amount}, User ID=${salary.user_id}, Month=${currentMonth}`);
 
       // 個人の予算を更新
-      const { data: newPersonalAmount, error: rpcError } = await supabase.rpc('increment_personal_budget', {
-        p_amount: salary.amount,
-        p_user_id: salary.user_id
-      });
+      const { data: budgetData, error: budgetError } = await supabase
+        .from('budgets')
+        .select('*')
+        .eq('user_id', salary.user_id)
+        .eq('month', currentMonth)
+        .single();
 
-      if (rpcError) {
-        console.error(`Error calling increment_personal_budget for user ${salary.user_id}:`, rpcError);
+      if (budgetError && budgetError.code !== 'PGRST116') {
+        console.error(`Error fetching budget for user ${salary.user_id}:`, budgetError);
         continue;
       }
 
-      console.log(`Personal budget updated: User ID=${salary.user_id}, New Amount=${newPersonalAmount}`);
-
-      const { error: personalBudgetError } = await supabase
+      // 予算がなければ作成、あれば加算
+      const { error: upsertError } = await supabase
         .from('budgets')
-        .update({ amount: newPersonalAmount })
-        .eq('user_id', salary.user_id)
-        .eq('month', currentMonth);
+        .upsert({
+          user_id: salary.user_id,
+          month: currentMonth,
+          amount: (budgetData?.amount || 0) + salary.amount
+        });
 
-      if (personalBudgetError) {
-        console.error(`Error updating personal budget for user ${salary.user_id}:`, personalBudgetError);
+      if (upsertError) {
+        console.error(`Error updating personal budget for user ${salary.user_id}:`, upsertError);
         continue;
       }
 

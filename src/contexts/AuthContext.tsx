@@ -1,99 +1,65 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { User } from '@supabase/supabase-js';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 
-interface Profile {
-  id: string;
-  name: string;
-  avatar_url: string | null;
-  created_at: string;
-}
-
 interface AuthContextType {
-  user: User | null;
-  profile: Profile | null;
+  user: any;
   loading: boolean;
+  initialized: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  profile: null,
   loading: true,
+  initialized: false,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
-    async function initializeAuth() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!isMounted) return;
-        if (session?.user) {
-          setUser(session.user);
-          await fetchProfile(session.user.id);
-        } else {
-          setUser(null);
-          setProfile(null);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setUser(null);
-          setProfile(null);
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    }
+    const checkSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('Current session:', session);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (!isMounted) return;
-        if (session?.user) {
-          setUser(session.user);
-          await fetchProfile(session.user.id);
-        } else {
-          setUser(null);
-          setProfile(null);
-        }
-        setLoading(false);
+      if (error || !session) {
+        console.log('No session found, redirecting to login...');
+        router.push('/login');
+        return;
       }
-    );
 
-    initializeAuth();
+      setUser(session.user);
+      setInitialized(true);
+      setLoading(false);
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) {
+        router.push('/login');
+      } else {
+        setUser(session.user);
+      }
+    });
+
     return () => {
-      isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
-
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select()
-        .eq('id', userId)
-        .single();
-      if (error) {
-        setProfile(null);
-      } else {
-        setProfile(data);
-      }
-    } catch (error) {
-      setProfile(null);
-    }
-  };
+  }, [router]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading }}>
+    <AuthContext.Provider value={{ user, loading, initialized }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => useContext(AuthContext); 
+export function useAuth() {
+  return useContext(AuthContext);
+} 
