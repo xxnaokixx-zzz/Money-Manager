@@ -33,11 +33,12 @@ interface Transaction {
 }
 
 interface Budget {
-  id: string;
+  id: number;
+  user_id: string;
   amount: number;
-  category_id: string;
-  group_id: string;
+  month: string;
   created_at: string;
+  updated_at: string;
 }
 
 interface Salary {
@@ -133,18 +134,19 @@ export default function Home() {
   // チャート用のデータを準備
   const chartData: ChartData = useMemo(() => {
     const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
-    const remainingAmount = budgetAmount - totalExpense; // 収入を含まない計算に修正
+    const remainingAmount = Math.max(0, budgetAmount - totalExpense);
+    const isUnderBudget = totalExpense < budgetAmount;
 
     return {
       labels: ['使用済み', '残り'],
       datasets: [{
         data: [
           totalExpense,
-          Math.max(0, remainingAmount)
+          remainingAmount
         ],
         backgroundColor: [
-          '#10B981',  // 使用済みも緑
-          '#10B981',  // 残りも緑
+          isUnderBudget ? '#EF4444' : '#10B981',  // 予算を下回る場合は赤、予算以上は緑
+          '#10B981',  // 残りは常に緑
         ],
         borderWidth: 0,
       }]
@@ -197,17 +199,18 @@ export default function Home() {
         supabase
           .from('budgets')
           .select('*')
-          .eq('user_id', user.id),
+          .eq('user_id', user.id)
+          .eq('month', `${selectedMonth}-01`),
         supabase
           .from('salaries')
           .select('*')
           .eq('user_id', user.id)
-          .maybeSingle(),
+          .single(),
         supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
-          .maybeSingle()
+          .single()
       ]);
 
       if (transactionsData.error) throw transactionsData.error;
@@ -216,20 +219,9 @@ export default function Home() {
       if (profileData.error && profileData.error.code !== 'PGRST116') throw profileData.error;
 
       setTransactions(transactionsData.data || []);
-
-      const processedBudgets = budgetsData.data?.map(budget => {
-        const categoryId = budget.category_id || '4';
-        return {
-          ...budget,
-          category: getCategoryName(categoryId)
-        };
-      }) || [];
-      setBudgets(processedBudgets);
-
+      setBudgets(budgetsData.data || []);
       setSalary(salaryData.data);
-      if (salaryData.data) {
-        await checkAndAddSalary(salaryData.data);
-      }
+      setProfile(profileData.data);
 
       if (!profileData.data) {
         const { data: newProfile, error: insertError } = await supabase
@@ -274,76 +266,122 @@ export default function Home() {
 
   const checkAndAddSalary = useCallback(async (salary: Salary): Promise<void> => {
     const today = new Date();
-    const currentDay = today.getDate();
     const lastPaid = new Date(salary.last_paid);
-    const currentMonth = today.getMonth();
-    const lastPaidMonth = lastPaid.getMonth();
 
-    if (currentDay >= salary.payday &&
-      (currentMonth !== lastPaidMonth ||
-        (currentMonth === lastPaidMonth && currentDay > lastPaid.getDate()))) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          router.push('/login');
-          return;
-        }
+    // 日付の比較用に時刻を除外
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const lastPaidDate = new Date(lastPaid.getFullYear(), lastPaid.getMonth(), lastPaid.getDate());
+    const payDate = new Date(today.getFullYear(), today.getMonth(), salary.payday);
 
-        const { error: transactionError } = await supabase
-          .from('transactions')
+    // 給与の自動追加の条件をチェック
+    const shouldAddSalary = () => {
+      // 1. 既に今月の給与が支払われている場合は false
+      if (lastPaidDate.getFullYear() === todayDate.getFullYear() &&
+        lastPaidDate.getMonth() === todayDate.getMonth()) {
+        console.log('今月の給与は既に支払済みです');
+        return false;
+      }
+
+      // 2. 給与日が今日の場合、または過去の給与日の場合に true
+      if (todayDate.getTime() >= payDate.getTime()) {
+        console.log('給与の追加条件を満たしています');
+        return true;
+      }
+
+      console.log('まだ給与日ではありません');
+      return false;
+    };
+
+    if (!shouldAddSalary()) {
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      // 既に同じ日の給与取引が存在するかチェック
+      const { data: existingTransactions, error: checkError } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('type', 'income')
+        .eq('category_id', '1')
+        .eq('description', '給料')
+        .eq('date', todayDate.toISOString().split('T')[0]);
+
+      if (checkError) throw checkError;
+      if (existingTransactions && existingTransactions.length > 0) {
+        console.log('給与は既に追加済みです:', todayDate.toISOString().split('T')[0]);
+        return;
+      }
+
+      // トランザクションの追加
+      const { error: transactionError } = await supabase
+        .from('transactions')
+        .insert([{
+          user_id: user.id,
+          type: 'income',
+          amount: salary.amount,
+          category_id: '1',
+          date: todayDate.toISOString().split('T')[0],
+          description: '給料'
+        }]);
+
+      if (transactionError) throw transactionError;
+
+      // 予算の更新
+      const currentMonthStr = todayDate.toISOString().split('T')[0].slice(0, 7);
+      const { data: budgetData, error: budgetError } = await supabase
+        .from('budgets')
+        .select('*')
+        .eq('month', `${currentMonthStr}-01`)
+        .eq('user_id', user.id)
+        .single();
+
+      if (budgetError && budgetError.code !== 'PGRST116') {
+        throw budgetError;
+      }
+
+      if (budgetData) {
+        const { error: updateError } = await supabase
+          .from('budgets')
+          .update({ amount: budgetData.amount + salary.amount })
+          .eq('id', budgetData.id);
+
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('budgets')
           .insert([{
-            type: 'income',
             amount: salary.amount,
-            category_id: '1',
-            date: today.toISOString().split('T')[0],
-            description: '給料'
+            month: `${currentMonthStr}-01`,
+            user_id: user.id
           }]);
 
-        if (transactionError) throw transactionError;
-
-        const currentMonthStr = today.toISOString().split('T')[0].slice(0, 7);
-        const { data: budgetData, error: budgetError } = await supabase
-          .from('budgets')
-          .select('*')
-          .eq('month', `${currentMonthStr}-01`)
-          .eq('user_id', user.id)
-          .single();
-
-        if (budgetError && budgetError.code !== 'PGRST116') {
-          throw budgetError;
-        }
-
-        if (budgetData) {
-          const { error: updateError } = await supabase
-            .from('budgets')
-            .update({ amount: budgetData.amount + salary.amount })
-            .eq('id', budgetData.id);
-
-          if (updateError) throw updateError;
-        } else {
-          const { error: insertError } = await supabase
-            .from('budgets')
-            .insert([{
-              amount: salary.amount,
-              month: `${currentMonthStr}-01`,
-              user_id: user.id
-            }]);
-
-          if (insertError) throw insertError;
-        }
-
-        const { error: salaryError } = await supabase
-          .from('salaries')
-          .update({ last_paid: today.toISOString().split('T')[0] })
-          .eq('id', salary.id);
-
-        if (salaryError) throw salaryError;
-
-        fetchData();
-      } catch (err) {
-        console.error('Error adding salary:', err);
-        setError('給料の自動追加に失敗しました');
+        if (insertError) throw insertError;
       }
+
+      // 最終支払日の更新
+      const { error: salaryError } = await supabase
+        .from('salaries')
+        .update({ last_paid: todayDate.toISOString().split('T')[0] })
+        .eq('id', salary.id);
+
+      if (salaryError) throw salaryError;
+
+      console.log('給与を追加しました:', {
+        date: todayDate.toISOString().split('T')[0],
+        amount: salary.amount
+      });
+
+      fetchData();
+    } catch (err) {
+      console.error('Error adding salary:', err);
+      setError('給料の自動追加に失敗しました');
     }
   }, [router, fetchData]);
 
