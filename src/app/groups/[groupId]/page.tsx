@@ -49,11 +49,19 @@ interface Group {
   }[];
 }
 
+interface Salary {
+  id: number;
+  amount: number;
+  payday: number;
+  user_id: string;
+}
+
 export default function GroupHomePage(props: { params: Promise<{ groupId: string }> }) {
   const params = use(props.params);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [group, setGroup] = useState<Group | null>(null);
+  const [salary, setSalary] = useState<Salary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
@@ -145,35 +153,28 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
     rotation: 0, // 開始位置を12時の位置に修正
   }), []);
 
-  useEffect(() => {
-    fetchData();
-  }, [params.groupId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        setLoading(false);
+        return;
+      }
+
       // グループ情報の取得
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
-        .select(`
-          *,
-          members:group_members(
-            user_id,
-            role
-          )
-        `)
+        .select('*')
         .eq('id', params.groupId)
         .single();
 
       if (groupError) {
         console.error('Group fetch error:', groupError);
         throw new Error(`グループ情報の取得に失敗しました: ${groupError.message}`);
-      }
-
-      if (!groupData) {
-        throw new Error('グループが見つかりません');
       }
 
       setGroup(groupData);
@@ -207,13 +208,31 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
 
       setBudgets(budgetsData || []);
 
+      // 給料情報の取得
+      const { data: salaryData, error: salaryError } = await supabase
+        .from('salaries')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (salaryError && salaryError.code !== 'PGRST116') {
+        console.error('Salary fetch error:', salaryError);
+        throw new Error(`給料情報の取得に失敗しました: ${salaryError.message}`);
+      }
+
+      setSalary(salaryData);
+
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(error instanceof Error ? error.message : 'データの取得に失敗しました');
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.groupId, selectedMonth, router]);
+
+  useEffect(() => {
+    fetchData();
+  }, [params.groupId]);
 
   const handleNavigation = useCallback((path: string) => {
     setLoading(true);
@@ -490,6 +509,39 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
           </table>
         </div>
       </div>
+
+      {salary && (
+        <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">給料情報</h2>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm text-gray-500">次の給料日</div>
+              <div className="text-lg font-medium text-gray-900">
+                {(() => {
+                  const today = new Date();
+                  const year = today.getFullYear();
+                  const month = today.getMonth();
+                  const payday = salary.payday;
+                  let nextPayday = new Date(year, month, payday);
+                  if (today > nextPayday) {
+                    // 今月の給料日を過ぎていれば来月
+                    nextPayday = new Date(year, month + 1, payday);
+                  }
+                  const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
+                })()}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">給料額</div>
+              <div className="text-lg font-medium text-gray-900">
+                ¥{salary.amount.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

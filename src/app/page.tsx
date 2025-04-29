@@ -629,27 +629,6 @@ export default function Home() {
               </div>
             </div>
           </div>
-          {salary && (
-            (() => {
-              const today = new Date();
-              const year = today.getFullYear();
-              const month = today.getMonth();
-              const payday = salary.payday;
-              let nextPayday = new Date(year, month, payday);
-              if (today > nextPayday) {
-                // 今月の給料日を過ぎていれば来月
-                nextPayday = new Date(year, month + 1, payday);
-              }
-              const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-              return (
-                <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-center">
-                  次の給料日: {salary.payday}日（あと{diffDays}日）<br />
-                  給料額: ¥{salary.amount.toLocaleString()}
-                </div>
-              );
-            })()
-          )}
         </div>
       </div>
 
@@ -732,6 +711,39 @@ export default function Home() {
           </table>
         </div>
       </div>
+
+      {salary && (
+        <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">給料情報</h2>
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm text-gray-500">次の給料日</div>
+              <div className="text-lg font-medium text-gray-900">
+                {(() => {
+                  const today = new Date();
+                  const year = today.getFullYear();
+                  const month = today.getMonth();
+                  const payday = salary.payday;
+                  let nextPayday = new Date(year, month, payday);
+                  if (today > nextPayday) {
+                    // 今月の給料日を過ぎていれば来月
+                    nextPayday = new Date(year, month + 1, payday);
+                  }
+                  const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
+                })()}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">給料額</div>
+              <div className="text-lg font-medium text-gray-900">
+                ¥{salary.amount.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
