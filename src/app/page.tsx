@@ -25,6 +25,11 @@ interface Transaction {
   date: string;
   description?: string;
   user_id: string;
+  categories?: {
+    id: string;
+    name: string;
+    type: string;
+  };
 }
 
 interface Budget {
@@ -113,7 +118,7 @@ export default function Home() {
     const categoryExpenses: CategoryExpenses = transactions
       .filter(t => t.type === 'expense')
       .reduce((acc, t) => {
-        const category = t.category || '未分類';
+        const category = t.categories?.name || '未分類';
         acc[category] = (acc[category] || 0) + t.amount;
         return acc;
       }, {} as CategoryExpenses);
@@ -177,7 +182,14 @@ export default function Home() {
       const [transactionsData, budgetsData, salaryData, profileData] = await Promise.all([
         supabase
           .from('transactions')
-          .select('*')
+          .select(`
+            *,
+            categories (
+              id,
+              name,
+              type
+            )
+          `)
           .eq('user_id', user.id)
           .gte('date', `${selectedMonth}-01`)
           .lte('date', new Date(new Date(`${selectedMonth}-01`).getFullYear(), new Date(`${selectedMonth}-01`).getMonth() + 1, 0).toISOString().split('T')[0])
@@ -696,7 +708,7 @@ export default function Home() {
                     {new Date(transaction.date).toLocaleDateString('ja-JP')}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {transaction.category}
+                    {transaction.categories?.name || '未分類'}
                   </td>
                   <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
                     }`}>
