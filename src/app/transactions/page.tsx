@@ -61,7 +61,7 @@ export default function TransactionsPage() {
           .from('transactions')
           .select(`
             *,
-            categories (
+            category:categories (
               id,
               name,
               type
@@ -85,7 +85,7 @@ export default function TransactionsPage() {
             id: transaction.id,
             type: transaction.type,
             amount: transaction.amount,
-            category: transaction.categories?.name || '未分類',
+            category: transaction.category?.name || '未分類',
             date: transaction.date,
             description: transaction.description
           };

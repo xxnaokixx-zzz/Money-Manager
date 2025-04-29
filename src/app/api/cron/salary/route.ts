@@ -22,18 +22,31 @@ export async function GET() {
       return NextResponse.json({ error: '給料情報の取得に失敗しました' }, { status: 500 });
     }
 
+    console.log(`Found ${salaries?.length || 0} salaries for day ${currentDay}`);
+
     // 各ユーザーの給料を予算に加算
     for (const salary of salaries) {
+      const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      console.log(`Processing salary: Amount=${salary.amount}, User ID=${salary.user_id}, Month=${currentMonth}`);
+
       // 個人の予算を更新
+      const { data: newPersonalAmount, error: rpcError } = await supabase.rpc('increment_personal_budget', {
+        p_amount: salary.amount,
+        p_user_id: salary.user_id
+      });
+
+      if (rpcError) {
+        console.error(`Error calling increment_personal_budget for user ${salary.user_id}:`, rpcError);
+        continue;
+      }
+
+      console.log(`Personal budget updated: User ID=${salary.user_id}, New Amount=${newPersonalAmount}`);
+
       const { error: personalBudgetError } = await supabase
         .from('budgets')
-        .update({
-          amount: supabase.rpc('increment_budget', {
-            p_amount: salary.amount,
-            p_user_id: salary.user_id
-          })
-        })
-        .eq('user_id', salary.user_id);
+        .update({ amount: newPersonalAmount })
+        .eq('user_id', salary.user_id)
+        .eq('month', currentMonth);
 
       if (personalBudgetError) {
         console.error(`Error updating personal budget for user ${salary.user_id}:`, personalBudgetError);
@@ -51,21 +64,35 @@ export async function GET() {
         continue;
       }
 
+      console.log(`Found ${groupMembers?.length || 0} groups for user ${salary.user_id}`);
+
       for (const member of groupMembers) {
+        console.log(`Processing group: Group ID=${member.group_id}, User ID=${salary.user_id}, Amount=${salary.amount}`);
+
+        const { data: newGroupAmount, error: groupRpcError } = await supabase.rpc('increment_group_budget', {
+          p_amount: salary.amount,
+          p_group_id: member.group_id.toString()
+        });
+
+        if (groupRpcError) {
+          console.error(`Error calling increment_group_budget for group ${member.group_id}:`, groupRpcError);
+          continue;
+        }
+
+        console.log(`Group budget updated: Group ID=${member.group_id}, New Amount=${newGroupAmount}`);
+
         const { error: groupBudgetError } = await supabase
           .from('group_budgets')
-          .update({
-            amount: supabase.rpc('increment_budget', {
-              p_amount: salary.amount,
-              p_group_id: member.group_id
-            })
-          })
-          .eq('group_id', member.group_id);
+          .update({ amount: newGroupAmount })
+          .eq('group_id', member.group_id)
+          .eq('month', currentMonth);
 
         if (groupBudgetError) {
           console.error(`Error updating group budget for group ${member.group_id}:`, groupBudgetError);
           continue;
         }
+
+        console.log(`Group budget final update complete: Group ID=${member.group_id}`);
       }
 
       // 取引履歴に給与を追加
@@ -102,6 +129,9 @@ export async function GET() {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error in salary cron job:', error);
-    return NextResponse.json({ error: '内部エラーが発生しました' }, { status: 500 });
+    return NextResponse.json({
+      error: '内部エラーが発生しました',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 } 

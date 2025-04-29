@@ -30,25 +30,34 @@ export async function GET(request: Request) {
 
     // 各ユーザーの給料を処理
     for (const salary of salaries) {
+      const currentDate = new Date(targetDate);
+      const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-01`;
+
       // 個人の予算を更新
-      const { data: budgetData, error: personalBudgetError } = await supabase
+      const { data: budgetData, error: budgetError } = await supabase
         .from('budgets')
         .select('*')
         .eq('user_id', salary.user_id)
+        .eq('month', currentMonth)
         .single();
 
-      if (!personalBudgetError) {
-        const newAmount = (budgetData?.amount || 0) + salary.amount;
-        const { error: updateError } = await supabase
-          .from('budgets')
-          .upsert({
-            user_id: salary.user_id,
-            amount: newAmount
-          });
+      if (budgetError && budgetError.code !== 'PGRST116') {
+        console.error(`Error fetching budget for user ${salary.user_id}:`, budgetError);
+        continue;
+      }
 
-        if (updateError) {
-          console.error(`Error updating personal budget for user ${salary.user_id}:`, updateError);
-        }
+      // 予算がなければ作成、あれば加算
+      const { error: upsertError } = await supabase
+        .from('budgets')
+        .upsert({
+          user_id: salary.user_id,
+          month: currentMonth,
+          amount: (budgetData?.amount || 0) + salary.amount
+        });
+
+      if (upsertError) {
+        console.error(`Error updating personal budget for user ${salary.user_id}:`, upsertError);
+        continue;
       }
 
       // グループの予算を更新
@@ -63,25 +72,31 @@ export async function GET(request: Request) {
       }
 
       for (const member of groupMembers) {
+        // グループの現在の月の予算を取得
         const { data: groupBudget, error: groupBudgetError } = await supabase
           .from('group_budgets')
           .select('*')
           .eq('group_id', member.group_id)
+          .eq('month', currentMonth)
           .single();
 
-        if (!groupBudgetError) {
-          const newAmount = (groupBudget?.amount || 0) + salary.amount;
-          const { error: updateError } = await supabase
-            .from('group_budgets')
-            .upsert({
-              group_id: member.group_id,
-              amount: newAmount,
-              category: 'all'
-            });
+        if (groupBudgetError && groupBudgetError.code !== 'PGRST116') {
+          console.error(`Error fetching group budget for group ${member.group_id}:`, groupBudgetError);
+          continue;
+        }
 
-          if (updateError) {
-            console.error(`Error updating group budget for group ${member.group_id}:`, updateError);
-          }
+        // グループ予算がなければ作成、あれば加算
+        const { error: upsertError } = await supabase
+          .from('group_budgets')
+          .upsert({
+            group_id: member.group_id,
+            month: currentMonth,
+            amount: (groupBudget?.amount || 0) + salary.amount
+          });
+
+        if (upsertError) {
+          console.error(`Error updating group budget for group ${member.group_id}:`, upsertError);
+          continue;
         }
       }
 
