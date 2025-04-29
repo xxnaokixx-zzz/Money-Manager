@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { use } from 'react';
 
 interface Transaction {
   id: number;
@@ -12,9 +12,12 @@ interface Transaction {
   category: string;
   date: string;
   description?: string;
+  group_id: number;
+  user_id: string;
 }
 
-export default function TransactionsPage() {
+export default function GroupTransactionsPage(props: { params: Promise<{ groupId: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,6 +43,18 @@ export default function TransactionsPage() {
           return;
         }
 
+        // グループメンバーであることを確認
+        const { data: member, error: memberError } = await supabase
+          .from('group_members')
+          .select('role')
+          .eq('group_id', params.groupId)
+          .eq('user_id', user.id)
+          .single();
+
+        if (memberError) {
+          throw new Error('グループメンバーではありません');
+        }
+
         // 給料情報を取得
         const { data: salaryData, error: salaryError } = await supabase
           .from('salary_dates')
@@ -60,7 +75,7 @@ export default function TransactionsPage() {
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('group_id', params.groupId)
           .gte('date', firstDay)
           .lte('date', lastDayStr)
           .order('date', { ascending: false });
@@ -70,10 +85,10 @@ export default function TransactionsPage() {
         if (error) throw error;
 
         setTransactions(data || []);
-        const income = data?.filter(t => t.type === 'income')
-          .reduce((sum, t) => sum + t.amount, 0) || 0;
-        const expense = data?.filter(t => t.type === 'expense')
-          .reduce((sum, t) => sum + t.amount, 0) || 0;
+        const income = data?.filter((t: Transaction) => t.type === 'income')
+          .reduce((sum: number, t: Transaction) => sum + t.amount, 0) || 0;
+        const expense = data?.filter((t: Transaction) => t.type === 'expense')
+          .reduce((sum: number, t: Transaction) => sum + t.amount, 0) || 0;
 
         setTotalIncome(income);
         setTotalExpense(expense);
@@ -81,10 +96,9 @@ export default function TransactionsPage() {
         if (!isMounted) return;
         console.error('Error fetching transactions:', error);
         setError('取引履歴の取得に失敗しました');
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+      }
+      if (isMounted) {
+        setIsLoading(false);
       }
     };
 
@@ -93,7 +107,7 @@ export default function TransactionsPage() {
     return () => {
       isMounted = false;
     };
-  }, [selectedMonth, router]);
+  }, [selectedMonth, router, params.groupId]);
 
   const handleNavigation = (href: string) => {
     setIsLoading(true);
@@ -132,18 +146,18 @@ export default function TransactionsPage() {
           <div className="flex justify-between items-center">
             <div className="flex items-center">
               <button
-                onClick={() => handleNavigation('/')}
+                onClick={() => handleNavigation(`/groups/${params.groupId}`)}
                 className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors mr-4"
               >
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7m-9 2v8m4-8v8m-4 0h4" />
                 </svg>
-                ホームに戻る
+                グループに戻る
               </button>
               <h1 className="text-2xl font-bold text-gray-800">取引履歴</h1>
             </div>
             <button
-              onClick={() => handleNavigation('/add')}
+              onClick={() => handleNavigation(`/groups/${params.groupId}/transactions/new`)}
               className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
             >
               <svg
