@@ -93,6 +93,15 @@ export default function Home() {
     categoryExpenses: CategoryExpenses;
   }
 
+  interface ChartData {
+    labels: string[];
+    datasets: {
+      data: number[];
+      backgroundColor: string[];
+      borderWidth: number;
+    }[];
+  }
+
   const { totalIncome, totalExpense, categoryExpenses } = useMemo<TransactionSummary>(() => {
     const income = transactions
       .filter(t => t.type === 'income')
@@ -116,6 +125,47 @@ export default function Home() {
       categoryExpenses
     };
   }, [transactions]);
+
+  // チャート用のデータを準備
+  const chartData: ChartData = useMemo(() => {
+    const initialBudget = budgets.length > 0 ? budgets[0].amount : 0;
+    const currentTotal = initialBudget + totalIncome - totalExpense; // 現在の合計額
+
+    // 予算額(initialBudget)を下回っている分を計算
+    const amountBelowBudget = Math.max(0, initialBudget - currentTotal);
+    const amountWithinBudget = totalExpense - amountBelowBudget;
+
+    return {
+      labels: ['予算割れ分', '使用済み', '残り'],
+      datasets: [{
+        data: [
+          currentTotal < initialBudget ? amountBelowBudget : 0,
+          amountWithinBudget,
+          Math.max(0, currentTotal)
+        ],
+        backgroundColor: [
+          '#EF4444',  // 予算額を下回った分は赤
+          '#10B981',  // 予算内は緑
+          '#10B981'   // 残りは緑
+        ],
+        borderWidth: 0,
+      }]
+    };
+  }, [totalExpense, budgets, totalIncome]);
+
+  // チャートのオプション設定
+  const chartOptions = useMemo(() => ({
+    cutout: '70%',
+    plugins: {
+      legend: {
+        display: false,
+      },
+      tooltip: {
+        enabled: false,
+      },
+    },
+    rotation: 0, // 開始位置を12時の位置に修正
+  }), []);
 
   // キャッシュの初期化
   const [cache, setCache] = useState<CacheData | null>(null);
@@ -369,47 +419,6 @@ export default function Home() {
     }
   }, [salary, checkAndAddSalary]);
 
-  const chartData = useMemo(() => {
-    const initialBudget = budgets.length > 0 ? budgets[0].amount : 0;
-    const currentTotal = initialBudget + totalIncome - totalExpense; // 現在の合計額
-
-    // 予算額(initialBudget)を下回っている分を計算
-    const amountBelowBudget = Math.max(0, initialBudget - currentTotal);
-    const amountWithinBudget = totalExpense - amountBelowBudget;
-
-    return {
-      labels: ['予算割れ分', '使用済み', '残り'],
-      datasets: [
-        {
-          data: [
-            currentTotal < initialBudget ? amountBelowBudget : 0,
-            amountWithinBudget,
-            Math.max(0, currentTotal)
-          ],
-          backgroundColor: [
-            '#EF4444',  // 予算額を下回った分は赤
-            '#10B981',  // 予算内は緑
-            '#10B981'   // 残りは緑
-          ],
-          borderWidth: 0,
-        },
-      ],
-    };
-  }, [totalExpense, budgets, totalIncome]);
-
-  const chartOptions = useMemo(() => ({
-    cutout: '70%',
-    plugins: {
-      legend: {
-        display: false,
-      },
-      tooltip: {
-        enabled: false,
-      },
-    },
-    rotation: 0, // 開始位置を12時の位置に修正
-  }), []);
-
   // カテゴリーIDからカテゴリー名を取得する関数
   const getCategoryName = (categoryId: number | undefined): string => {
     if (categoryId === undefined) return '未分類';
@@ -459,6 +468,32 @@ export default function Home() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
+      {/* ヘッダー */}
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold text-gray-800">マイホーム</h1>
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => router.push('/groups')}
+            className="inline-flex items-center px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            <svg
+              className="w-4 h-4 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+              />
+            </svg>
+            グループを切り替え
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
           <div className="flex justify-between items-center mb-4">
@@ -695,22 +730,6 @@ export default function Home() {
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* グループ機能カード */}
-      <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">グループ機能</h2>
-        <div className="space-y-4">
-          <p className="text-gray-600">
-            友達や家族と一緒に家計簿を管理できます。グループを作成して、共同で支出を管理しましょう。
-          </p>
-          <Link
-            href="/groups/new"
-            className="inline-block w-full bg-blue-500 text-white py-2 px-4 rounded-md text-center hover:bg-blue-600 transition-colors"
-          >
-            グループを作成
-          </Link>
         </div>
       </div>
     </div>
