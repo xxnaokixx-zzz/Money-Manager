@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { Doughnut } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { supabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/AuthContext';
+import dynamic from 'next/dynamic';
+import { supabase } from '@/lib/supabase-browser';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 
 // Chart.jsの初期化
 ChartJS.register(ArcElement, Tooltip, Legend);
@@ -29,11 +28,11 @@ interface Transaction {
 }
 
 interface Budget {
-  id: number;
+  id: string;
   amount: number;
-  category_id: number;
-  category?: string;
-  user_id: string;
+  category_id: string;
+  group_id: string;
+  created_at: string;
 }
 
 interface Salary {
@@ -72,8 +71,8 @@ export default function Home() {
   const [ownerInfo, setOwnerInfo] = useState<{ name: string; type: string } | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const [newTransaction, setNewTransaction] = useState({
-    type: 'expense',
-    amount: 0,
+    type: 'expense' as 'income' | 'expense',
+    amount: '',
     category: '',
     date: new Date().toISOString().split('T')[0],
     description: ''
@@ -128,30 +127,24 @@ export default function Home() {
 
   // チャート用のデータを準備
   const chartData: ChartData = useMemo(() => {
-    const initialBudget = budgets.length > 0 ? budgets[0].amount : 0;
-    const currentTotal = initialBudget + totalIncome - totalExpense; // 現在の合計額
-
-    // 予算額(initialBudget)を下回っている分を計算
-    const amountBelowBudget = Math.max(0, initialBudget - currentTotal);
-    const amountWithinBudget = totalExpense - amountBelowBudget;
+    const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
+    const remainingAmount = budgetAmount - totalExpense; // 収入を含まない計算に修正
 
     return {
-      labels: ['予算割れ分', '使用済み', '残り'],
+      labels: ['使用済み', '残り'],
       datasets: [{
         data: [
-          currentTotal < initialBudget ? amountBelowBudget : 0,
-          amountWithinBudget,
-          Math.max(0, currentTotal)
+          totalExpense,
+          Math.max(0, remainingAmount)
         ],
         backgroundColor: [
-          '#EF4444',  // 予算額を下回った分は赤
-          '#10B981',  // 予算内は緑
-          '#10B981'   // 残りは緑
+          '#10B981',  // 使用済みも緑
+          '#10B981',  // 残りも緑
         ],
         borderWidth: 0,
       }]
     };
-  }, [totalExpense, budgets, totalIncome]);
+  }, [totalExpense, budgets]);
 
   // チャートのオプション設定
   const chartOptions = useMemo(() => ({
@@ -213,7 +206,7 @@ export default function Home() {
       setTransactions(transactionsData.data || []);
 
       const processedBudgets = budgetsData.data?.map(budget => {
-        const categoryId = budget.category_id || 4;
+        const categoryId = budget.category_id || '4';
         return {
           ...budget,
           category: getCategoryName(categoryId)
@@ -289,7 +282,7 @@ export default function Home() {
           .insert([{
             type: 'income',
             amount: salary.amount,
-            category_id: 1,
+            category_id: '1',
             date: today.toISOString().split('T')[0],
             description: '給料'
           }]);
@@ -354,14 +347,21 @@ export default function Home() {
         return;
       }
 
+      const amount = parseInt(newTransaction.amount, 10);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error('有効な金額を入力してください');
+      }
+
       const transactionData = {
         type: newTransaction.type,
-        amount: newTransaction.amount || 0,
-        category: newTransaction.category,
+        amount: amount,
+        category_id: newTransaction.category || '4', // デフォルトは'その他'
         date: newTransaction.date,
         description: newTransaction.description,
         user_id: user.id
       };
+
+      console.log('Saving transaction:', transactionData); // デバッグ用
 
       const { error } = await supabase
         .from('transactions')
@@ -371,35 +371,33 @@ export default function Home() {
 
       // 収入の場合、予算を更新
       if (newTransaction.type === 'income') {
-        const { data: currentBudget } = await supabase
+        const currentMonth = newTransaction.date.slice(0, 7) + '-01';
+        const { data: currentBudget, error: budgetFetchError } = await supabase
           .from('budgets')
           .select('*')
           .eq('user_id', user.id)
+          .eq('month', currentMonth)
           .single();
 
-        if (currentBudget) {
-          const { error: budgetError } = await supabase
-            .from('budgets')
-            .update({ amount: currentBudget.amount + newTransaction.amount })
-            .eq('id', currentBudget.id);
-
-          if (budgetError) throw budgetError;
-        } else {
-          // 予算が存在しない場合は新規作成
-          const { error: budgetError } = await supabase
-            .from('budgets')
-            .insert([{
-              amount: newTransaction.amount,
-              user_id: user.id
-            }]);
-
-          if (budgetError) throw budgetError;
+        if (budgetFetchError && budgetFetchError.code !== 'PGRST116') {
+          throw budgetFetchError;
         }
+
+        const newAmount = (currentBudget?.amount || 0) + amount;
+        const { error: budgetError } = await supabase
+          .from('budgets')
+          .upsert({
+            user_id: user.id,
+            month: currentMonth,
+            amount: newAmount
+          });
+
+        if (budgetError) throw budgetError;
       }
 
       setNewTransaction({
         type: 'expense',
-        amount: 0,
+        amount: '',
         category: '',
         date: new Date().toISOString().split('T')[0],
         description: ''
@@ -420,18 +418,18 @@ export default function Home() {
   }, [salary, checkAndAddSalary]);
 
   // カテゴリーIDからカテゴリー名を取得する関数
-  const getCategoryName = (categoryId: number | undefined): string => {
+  const getCategoryName = (categoryId: string | undefined): string => {
     if (categoryId === undefined) return '未分類';
 
     console.log('Getting category name for ID:', categoryId);
     switch (categoryId) {
-      case 1:
+      case '1':
         return '食費';
-      case 2:
+      case '2':
         return '交通費';
-      case 3:
+      case '3':
         return '娯楽';
-      case 4:
+      case '4':
         return 'その他';
       default:
         console.log('Unknown category ID:', categoryId);
@@ -567,7 +565,7 @@ export default function Home() {
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-gray-800">
-                      ¥{Math.max(0, (budgets[0].amount + totalIncome - totalExpense)).toLocaleString()}
+                      ¥{Math.max(0, (budgets[0].amount - totalExpense)).toLocaleString()}
                     </div>
                     <div className="text-sm text-gray-600">
                       残り
@@ -598,7 +596,7 @@ export default function Home() {
                   <div className="flex justify-between text-sm font-medium">
                     <span>利用可能額</span>
                     <span className="text-blue-600">
-                      ¥{(budgets[0].amount + totalIncome - totalExpense).toLocaleString()}
+                      ¥{Math.max(0, budgets[0].amount - totalExpense).toLocaleString()}
                     </span>
                   </div>
                 </div>
