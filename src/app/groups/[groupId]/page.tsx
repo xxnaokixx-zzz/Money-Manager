@@ -56,17 +56,34 @@ interface Salary {
   user_id: string;
 }
 
+interface Profile {
+  id: string;
+  name: string;
+  // Add any other necessary properties for the Profile type
+}
+
 export default function GroupHomePage(props: { params: Promise<{ groupId: string }> }) {
   const params = use(props.params);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [group, setGroup] = useState<Group | null>(null);
-  const [salary, setSalary] = useState<Salary | null>(null);
+  const [memberSalaries, setMemberSalaries] = useState<Array<{
+    salary: {
+      id: number;
+      amount: number;
+      payday: number;
+    };
+    profile: {
+      id: string;
+      name: string;
+    };
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile: authProfile } = useAuth();
+  console.log('Auth Profile:', authProfile);
 
   // 型を明示的に定義
   interface CategoryExpenses {
@@ -208,19 +225,76 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
 
       setBudgets(budgetsData || []);
 
-      // 給料情報の取得
-      const { data: salaryData, error: salaryError } = await supabase
-        .from('salaries')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      // グループメンバーの情報を取得
+      const { data: membersData, error: membersError } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', params.groupId);
 
-      if (salaryError && salaryError.code !== 'PGRST116') {
-        console.error('Salary fetch error:', salaryError);
-        throw new Error(`給料情報の取得に失敗しました: ${salaryError.message}`);
+      if (membersError) {
+        console.error('Members fetch error:', membersError);
+        throw new Error(`メンバー情報の取得に失敗しました: ${membersError.message}`);
       }
 
-      setSalary(salaryData);
+      // メンバーのプロファイル情報を取得
+      const memberIds = membersData.map(member => member.user_id);
+      console.log('Member IDs:', memberIds);
+
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select('id, name')
+        .in('id', memberIds);
+
+      if (usersError) {
+        console.error('Users fetch error:', usersError);
+        throw new Error(`ユーザー情報の取得に失敗しました: ${usersError.message}`);
+      }
+      console.log('Users data:', usersData);
+
+      // メンバーの給料情報を取得
+      const { data: salariesData, error: salariesError } = await supabase
+        .from('salaries')
+        .select('*')
+        .in('user_id', memberIds);
+
+      if (salariesError) {
+        console.error('Salaries fetch error:', salariesError);
+        throw new Error(`給料情報の取得に失敗しました: ${salariesError.message}`);
+      }
+      console.log('Salaries data:', salariesData);
+
+      // データを結合
+      const salaries = usersData
+        .map(user => {
+          const salary = salariesData.find(s => s.user_id === user.id);
+          console.log('User:', user);
+          console.log('Found salary:', salary);
+          return salary ? {
+            salary: {
+              id: salary.id,
+              amount: salary.amount,
+              payday: salary.payday
+            },
+            profile: {
+              id: user.id,
+              name: user.name
+            }
+          } : null;
+        })
+        .filter((item): item is {
+          salary: {
+            id: number;
+            amount: number;
+            payday: number;
+          };
+          profile: {
+            id: string;
+            name: string;
+          };
+        } => item !== null);
+
+      console.log('Combined salaries:', salaries);
+      setMemberSalaries(salaries);
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -510,35 +584,45 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         </div>
       </div>
 
-      {salary && (
+      {memberSalaries.length > 0 && (
         <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">給料情報</h2>
-          <div className="space-y-4">
-            <div>
-              <div className="text-sm text-gray-500">次の給料日</div>
-              <div className="text-lg font-medium text-gray-900">
-                {(() => {
-                  const today = new Date();
-                  const year = today.getFullYear();
-                  const month = today.getMonth();
-                  const payday = salary.payday;
-                  let nextPayday = new Date(year, month, payday);
-                  if (today > nextPayday) {
-                    // 今月の給料日を過ぎていれば来月
-                    nextPayday = new Date(year, month + 1, payday);
-                  }
-                  const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
-                })()}
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">メンバーの給料情報</h2>
+          <div className="space-y-6">
+            {memberSalaries.map(({ salary, profile }) => (
+              <div key={profile.id} className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
+                <h3 className="text-md font-medium text-gray-800 mb-3">
+                  {profile.name}
+                  <span className="text-sm text-gray-500 ml-2">さんの給料情報</span>
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm text-gray-500">次の給料日</div>
+                    <div className="text-lg font-medium text-gray-900">
+                      {(() => {
+                        const today = new Date();
+                        const year = today.getFullYear();
+                        const month = today.getMonth();
+                        const payday = salary.payday;
+                        let nextPayday = new Date(year, month, payday);
+                        if (today > nextPayday) {
+                          // 今月の給料日を過ぎていれば来月
+                          nextPayday = new Date(year, month + 1, payday);
+                        }
+                        const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
+                      })()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500">給料額</div>
+                    <div className="text-lg font-medium text-gray-900">
+                      ¥{salary.amount.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">給料額</div>
-              <div className="text-lg font-medium text-gray-900">
-                ¥{salary.amount.toLocaleString()}
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       )}
