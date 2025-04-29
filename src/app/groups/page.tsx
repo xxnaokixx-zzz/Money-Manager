@@ -149,7 +149,8 @@ export default function GroupsPage() {
           {groups.map((group) => (
             <div
               key={group.id}
-              className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 hover:shadow-md transition-shadow"
+              onClick={() => handleNavigation(`/groups/${group.id}`)}
+              className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 hover:shadow-md transition-shadow cursor-pointer"
             >
               <div className="flex justify-between items-start mb-4">
                 <h2 className="text-xl font-semibold text-gray-800">
@@ -157,7 +158,10 @@ export default function GroupsPage() {
                 </h2>
                 {(user && group.created_by === user.id) && (
                   <button
-                    onClick={() => handleDeleteGroup(group.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteGroup(group.id);
+                    }}
                     className="ml-2 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
                   >
                     削除
@@ -180,6 +184,7 @@ export default function GroupsPage() {
                 <div className="mt-2">
                   <Link
                     href={`/groups/${group.id}/members/new`}
+                    onClick={(e) => e.stopPropagation()}
                     className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 text-sm"
                   >
                     メンバーを追加
