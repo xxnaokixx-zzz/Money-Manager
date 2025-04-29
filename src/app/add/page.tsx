@@ -6,15 +6,31 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 const categories = {
-  income: ['給与', '賞与', '副業', 'その他収入'],
-  expense: ['食費', '日用品', '交通費', '交際費', '趣味', 'その他支出']
+  income: [
+    { id: 1, name: '給与' },
+    { id: 2, name: '賞与' },
+    { id: 3, name: '副業' },
+    { id: 4, name: '投資' },
+    { id: 5, name: 'その他' }
+  ],
+  expense: [
+    { id: 6, name: '食費' },
+    { id: 7, name: '交通費' },
+    { id: 8, name: '住居費' },
+    { id: 9, name: '光熱費' },
+    { id: 10, name: '通信費' },
+    { id: 11, name: '娯楽費' },
+    { id: 12, name: '医療費' },
+    { id: 13, name: '教育費' },
+    { id: 14, name: '被服費' }
+  ]
 };
 
 export default function AddTransaction() {
   const router = useRouter();
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState<number>(0);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,7 +58,7 @@ export default function AddTransaction() {
         .insert([{
           type,
           amount: parseInt(amount),
-          category,
+          category_id: categoryId,
           date,
           description,
           user_id: user.id
@@ -124,15 +140,15 @@ export default function AddTransaction() {
               カテゴリー
             </label>
             <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              value={categoryId}
+              onChange={(e) => setCategoryId(parseInt(e.target.value))}
               className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               required
             >
               <option value="">選択してください</option>
               {categories[type].map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
                 </option>
               ))}
             </select>

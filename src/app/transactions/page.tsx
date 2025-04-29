@@ -59,20 +59,44 @@ export default function TransactionsPage() {
 
         const { data, error } = await supabase
           .from('transactions')
-          .select('*')
+          .select(`
+            *,
+            categories (
+              id,
+              name,
+              type
+            )
+          `)
           .eq('user_id', user.id)
           .gte('date', firstDay)
           .lte('date', lastDayStr)
           .order('date', { ascending: false });
 
+        console.log('Fetched transactions:', data); // デバッグ用
+
         if (!isMounted) return;
 
         if (error) throw error;
 
-        setTransactions(data || []);
-        const income = data?.filter(t => t.type === 'income')
+        // カテゴリー情報を含むデータに変換
+        const transformedData = data?.map(transaction => {
+          console.log('Processing transaction:', transaction); // デバッグ用
+          return {
+            id: transaction.id,
+            type: transaction.type,
+            amount: transaction.amount,
+            category: transaction.categories?.name || '未分類',
+            date: transaction.date,
+            description: transaction.description
+          };
+        }) as Transaction[];
+
+        console.log('Transformed transactions:', transformedData); // デバッグ用
+
+        setTransactions(transformedData);
+        const income = transformedData?.filter(t => t.type === 'income')
           .reduce((sum, t) => sum + t.amount, 0) || 0;
-        const expense = data?.filter(t => t.type === 'expense')
+        const expense = transformedData?.filter(t => t.type === 'expense')
           .reduce((sum, t) => sum + t.amount, 0) || 0;
 
         setTotalIncome(income);
