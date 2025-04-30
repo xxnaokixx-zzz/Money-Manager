@@ -64,10 +64,10 @@ interface Profile {
 
 interface SupabaseMemberResponse {
   user_id: string;
-  users: {
+  users: Array<{
     id: string;
     name: string;
-  };
+  }>;
   salaries: Array<{
     id: number;
     amount: number;
@@ -318,7 +318,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
 
       // データを整形
       const formattedSalaries = ((membersWithProfiles || []) as SupabaseMemberResponse[]).map(member => {
-        if (!member.users || !member.salaries?.[0]) return null;
+        if (!member.users?.[0] || !member.salaries?.[0]) return null;
         return {
           salary: {
             id: member.salaries[0].id,
@@ -326,8 +326,8 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
             payday: member.salaries[0].payday
           },
           profile: {
-            id: member.users.id,
-            name: member.users.name
+            id: member.users[0].id,
+            name: member.users[0].name
           }
         };
       }).filter((item): item is NonNullable<typeof item> => item !== null);
