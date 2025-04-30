@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { format } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Budget {
   id: number;
@@ -15,6 +16,7 @@ interface Budget {
 
 export default function BudgetPage() {
   const router = useRouter();
+  const { profile } = useAuth();
   const [budget, setBudget] = useState<Budget | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +219,9 @@ export default function BudgetPage() {
             </svg>
             ホームに戻る
           </button>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">予算設定</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">
+            {profile?.name ? `${profile.name}さんの予算設定` : '予算設定'}
+          </h1>
           <p className="text-gray-600 mt-2">
             月ごとの予算を設定して、支出管理を始めましょう。
           </p>

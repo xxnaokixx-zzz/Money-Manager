@@ -46,11 +46,12 @@ interface Salary {
   amount: number;
   payday: number;
   last_paid: string;
+  user_id: string;
 }
 
 interface Profile {
   id: string;
-  username: string;
+  email: string;
   avatar_url?: string | null;
   name: string;
 }
@@ -170,6 +171,10 @@ export default function Home() {
   // キャッシュの初期化
   const [cache, setCache] = useState<CacheData | null>(null);
 
+  // 給与の自動追加を管理するための状態
+  const [lastSalaryAddition, setLastSalaryAddition] = useState<Date | null>(null);
+  const [isAddingSalary, setIsAddingSalary] = useState(false);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -181,7 +186,7 @@ export default function Home() {
       }
 
       // データ取得を並列実行
-      const [transactionsData, budgetsData, salaryData, profileData] = await Promise.all([
+      const [transactionsData, budgetsData, salaryData, userData] = await Promise.all([
         supabase
           .from('transactions')
           .select(`
@@ -207,7 +212,7 @@ export default function Home() {
           .eq('user_id', user.id)
           .single(),
         supabase
-          .from('profiles')
+          .from('users')
           .select('*')
           .eq('id', user.id)
           .single()
@@ -216,30 +221,17 @@ export default function Home() {
       if (transactionsData.error) throw transactionsData.error;
       if (budgetsData.error) throw budgetsData.error;
       if (salaryData.error && salaryData.error.code !== 'PGRST116') throw salaryData.error;
-      if (profileData.error && profileData.error.code !== 'PGRST116') throw profileData.error;
+      if (userData.error) throw userData.error;
 
       setTransactions(transactionsData.data || []);
       setBudgets(budgetsData.data || []);
       setSalary(salaryData.data);
-      setProfile(profileData.data);
+      setProfile(userData.data);
 
-      if (!profileData.data) {
-        const { data: newProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert([{ id: user.id, username: 'あなた' }])
-          .select()
-          .single();
-
-        if (insertError) {
-          setOwnerInfo({ name: 'あなた', type: '個人' });
-        } else {
-          setProfile(newProfile);
-          setOwnerInfo({ name: newProfile.username || 'あなた', type: '個人' });
-        }
-      } else {
-        setProfile(profileData.data);
-        setOwnerInfo({ name: profileData.data.username || 'あなた', type: '個人' });
-      }
+      setOwnerInfo({
+        name: userData.data?.name || 'あなた',
+        type: '個人'
+      });
     } catch (error) {
       console.error('Error fetching data:', error);
       setError('データの取得に失敗しました');
@@ -265,125 +257,170 @@ export default function Home() {
   }, [router]);
 
   const checkAndAddSalary = useCallback(async (salary: Salary): Promise<void> => {
-    const today = new Date();
-    const lastPaid = new Date(salary.last_paid);
-
-    // 日付の比較用に時刻を除外
-    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const lastPaidDate = new Date(lastPaid.getFullYear(), lastPaid.getMonth(), lastPaid.getDate());
-    const payDate = new Date(today.getFullYear(), today.getMonth(), salary.payday);
-
-    // 給与の自動追加の条件をチェック
-    const shouldAddSalary = () => {
-      // 1. 既に今月の給与が支払われている場合は false
-      if (lastPaidDate.getFullYear() === todayDate.getFullYear() &&
-        lastPaidDate.getMonth() === todayDate.getMonth()) {
-        console.log('今月の給与は既に支払済みです');
-        return false;
-      }
-
-      // 2. 給与日が今日の場合、または過去の給与日の場合に true
-      if (todayDate.getTime() >= payDate.getTime()) {
-        console.log('給与の追加条件を満たしています');
-        return true;
-      }
-
-      console.log('まだ給与日ではありません');
-      return false;
-    };
-
-    if (!shouldAddSalary()) {
+    // 既に処理中の場合や、今日すでに処理済みの場合はスキップ
+    if (isAddingSalary || (lastSalaryAddition && isSameDay(lastSalaryAddition, new Date()))) {
       return;
     }
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
-      }
+    const today = new Date();
+    const lastPaid = new Date(salary.last_paid);
+    const currentDay = today.getDate();
 
-      // 既に同じ日の給与取引が存在するかチェック
-      const { data: existingTransactions, error: checkError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('type', 'income')
-        .eq('category_id', '1')
-        .eq('description', '給料')
-        .eq('date', todayDate.toISOString().split('T')[0]);
+    // 給与日で、かつ最終支払日が今月より前の場合のみ実行
+    if (currentDay === salary.payday &&
+      (lastPaid.getMonth() !== today.getMonth() ||
+        lastPaid.getFullYear() !== today.getFullYear())) {
 
-      if (checkError) throw checkError;
-      if (existingTransactions && existingTransactions.length > 0) {
-        console.log('給与は既に追加済みです:', todayDate.toISOString().split('T')[0]);
-        return;
-      }
+      try {
+        setIsAddingSalary(true);
+        setLastSalaryAddition(today);
 
-      // トランザクションの追加
-      const { error: transactionError } = await supabase
-        .from('transactions')
-        .insert([{
-          user_id: user.id,
-          type: 'income',
-          amount: salary.amount,
-          category_id: '1',
-          date: todayDate.toISOString().split('T')[0],
-          description: '給料'
-        }]);
+        // トランザクションの開始を確認
+        const { data: existingTransaction, error: transactionCheckError } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('user_id', salary.user_id)
+          .eq('type', 'income')
+          .eq('description', '給与')
+          .gte('date', today.toISOString().split('T')[0])
+          .single();
 
-      if (transactionError) throw transactionError;
+        if (transactionCheckError && transactionCheckError.code !== 'PGRST116') {
+          throw transactionCheckError;
+        }
 
-      // 予算の更新
-      const currentMonthStr = todayDate.toISOString().split('T')[0].slice(0, 7);
-      const { data: budgetData, error: budgetError } = await supabase
-        .from('budgets')
-        .select('*')
-        .eq('month', `${currentMonthStr}-01`)
-        .eq('user_id', user.id)
-        .single();
+        // 今日の給与が既に追加されている場合はスキップ
+        if (existingTransaction) {
+          console.log('Salary already added today');
+          return;
+        }
 
-      if (budgetError && budgetError.code !== 'PGRST116') {
-        throw budgetError;
-      }
+        const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+        const todayDate = new Date();
 
-      if (budgetData) {
-        const { error: updateError } = await supabase
+        // 個人の予算を更新
+        const { data: budgetData, error: budgetError } = await supabase
           .from('budgets')
-          .update({ amount: budgetData.amount + salary.amount })
-          .eq('id', budgetData.id);
+          .select('*')
+          .eq('user_id', salary.user_id)
+          .eq('month', `${currentMonthStr}-01`)
+          .single();
 
-        if (updateError) throw updateError;
-      } else {
-        const { error: insertError } = await supabase
-          .from('budgets')
-          .insert([{
+        if (budgetError && budgetError.code !== 'PGRST116') {
+          throw budgetError;
+        }
+
+        // 予算の更新または新規作成
+        if (budgetData) {
+          const { error: updateError } = await supabase
+            .from('budgets')
+            .update({ amount: budgetData.amount + salary.amount })
+            .eq('id', budgetData.id);
+
+          if (updateError) throw updateError;
+        } else {
+          const { error: insertError } = await supabase
+            .from('budgets')
+            .insert([{
+              amount: salary.amount,
+              month: `${currentMonthStr}-01`,
+              user_id: salary.user_id
+            }]);
+
+          if (insertError) throw insertError;
+        }
+
+        // グループの予算を更新
+        const { data: groupMembers, error: groupMembersError } = await supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', salary.user_id);
+
+        if (groupMembersError) throw groupMembersError;
+
+        // グループ予算の更新とトランザクションの追加を直列処理に変更
+        for (const member of groupMembers) {
+          // グループ予算の更新
+          const { error: groupRpcError } = await supabase.rpc('increment_group_budget', {
+            p_amount: salary.amount,
+            p_group_id: member.group_id
+          });
+          if (groupRpcError) throw groupRpcError;
+
+          // グループの取引履歴に給与を追加
+          const { error: groupTransactionError } = await supabase
+            .from('transactions')
+            .insert({
+              user_id: salary.user_id,
+              group_id: member.group_id,
+              amount: salary.amount,
+              type: 'income',
+              category_id: 1,
+              date: todayDate.toISOString().split('T')[0],  // 日付をYYYY-MM-DD形式に変更
+              description: '給与'
+            });
+
+          if (groupTransactionError) throw groupTransactionError;
+        }
+
+        // 最終支払日の更新
+        const { error: salaryError } = await supabase
+          .from('salaries')
+          .update({ last_paid: todayDate.toISOString().split('T')[0] })
+          .eq('id', salary.id);
+
+        if (salaryError) throw salaryError;
+
+        // 個人の取引履歴に給与を追加
+        const { error: transactionError } = await supabase
+          .from('transactions')
+          .insert({
+            user_id: salary.user_id,
             amount: salary.amount,
-            month: `${currentMonthStr}-01`,
-            user_id: user.id
-          }]);
+            type: 'income',
+            category_id: 1,
+            date: todayDate.toISOString().split('T')[0],
+            description: '給与'
+          });
 
-        if (insertError) throw insertError;
+        if (transactionError) throw transactionError;
+
+        // 給料加算履歴を記録
+        const { error: historyError } = await supabase
+          .from('salary_additions')
+          .insert({
+            user_id: salary.user_id,
+            amount: salary.amount,
+            date: todayDate.toISOString().split('T')[0]
+          });
+
+        if (historyError) throw historyError;
+
+        fetchData();
+      } catch (err) {
+        console.error('Error adding salary:', err);
+        setError('給料の自動追加に失敗しました');
+        // エラーが発生した場合は状態をリセット
+        setIsAddingSalary(false);
+        setLastSalaryAddition(null);
+      } finally {
+        setIsAddingSalary(false);
       }
-
-      // 最終支払日の更新
-      const { error: salaryError } = await supabase
-        .from('salaries')
-        .update({ last_paid: todayDate.toISOString().split('T')[0] })
-        .eq('id', salary.id);
-
-      if (salaryError) throw salaryError;
-
-      console.log('給与を追加しました:', {
-        date: todayDate.toISOString().split('T')[0],
-        amount: salary.amount
-      });
-
-      fetchData();
-    } catch (err) {
-      console.error('Error adding salary:', err);
-      setError('給料の自動追加に失敗しました');
     }
-  }, [router, fetchData]);
+  }, [isAddingSalary, lastSalaryAddition]);
+
+  // 日付が同じ日かどうかを判定するヘルパー関数
+  const isSameDay = (date1: Date, date2: Date): boolean => {
+    return date1.getFullYear() === date2.getFullYear() &&
+      date1.getMonth() === date2.getMonth() &&
+      date1.getDate() === date2.getDate();
+  };
+
+  useEffect(() => {
+    if (salary && !isAddingSalary) {
+      checkAndAddSalary(salary);
+    }
+  }, [salary, checkAndAddSalary, isAddingSalary]);
 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -460,12 +497,6 @@ export default function Home() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (salary) {
-      checkAndAddSalary(salary);
-    }
-  }, [salary, checkAndAddSalary]);
 
   // カテゴリーIDからカテゴリー名を取得する関数
   const getCategoryName = (categoryId: string | undefined): string => {

@@ -42,7 +42,7 @@ export default function TransactionsPage() {
 
         // 給料情報を取得
         const { data: salaryData, error: salaryError } = await supabase
-          .from('salary_dates')
+          .from('salaries')
           .select('date, amount')
           .eq('user_id', user.id)
           .single();

@@ -32,9 +32,9 @@ export const uploadAvatar = async (userId: string, file: File) => {
       .from('avatars')
       .getPublicUrl(filePath);
 
-    // プロフィールを更新
+    // ユーザー情報を更新
     const { error: updateError } = await supabase
-      .from('profiles')
+      .from('users')
       .update({ avatar_url: publicUrl })
       .eq('id', userId);
 

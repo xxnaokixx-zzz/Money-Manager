@@ -123,6 +123,18 @@ export default function Header() {
                       sizes="32px"
                       className="rounded-full object-cover"
                       priority
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = `
+                            <div class="w-full h-full rounded-full bg-gray-200 flex items-center justify-center">
+                              <span class="text-gray-600">${profile?.name?.[0] || '?'}</span>
+                            </div>
+                          `;
+                        }
+                      }}
                     />
                   </div>
                 ) : (

@@ -26,7 +26,7 @@ export default function NewGroupTransactionPage(props: { params: Promise<{ group
         if (!user) return;
 
         const { data, error } = await supabase
-          .from('salary_dates')
+          .from('salaries')
           .select('date')
           .eq('user_id', user.id)
           .single();

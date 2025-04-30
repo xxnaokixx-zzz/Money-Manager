@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import Link from 'next/link';
@@ -12,125 +12,101 @@ interface Member {
   monthly_income: number;
 }
 
-interface MemberData {
-  user_id: string;
-  users: {
-    name: string;
-  } | null;
-}
-
 interface Budget {
   amount: number;
   month: string;
 }
 
+interface MemberData {
+  user_id: string;
+  users: {
+    name: string;
+  };
+}
+
 export default function GroupBudgetPage() {
   const params = useParams();
   const router = useRouter();
-  const [members, setMembers] = useState<Member[]>([]);
-  const [budget, setBudget] = useState<Budget | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [members, setMembers] = useState<Member[]>([]);
+  const [budget, setBudget] = useState<Budget | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedAmount, setEditedAmount] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(
+    new Date().toISOString().split('T')[0].slice(0, 7)
+  );
 
-  const totalIncome = members.reduce((sum, member) => sum + member.monthly_income, 0);
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const currentMonth = `${selectedMonth}-01`;
+
+      // グループメンバーの情報を取得
+      const { data: membersData, error: membersError } = await supabase
+        .from('group_members')
+        .select(`
+          user_id,
+          users (
+            name
+          )
+        `)
+        .eq('group_id', params.groupId);
+
+      if (membersError) {
+        throw new Error(`メンバー情報の取得に失敗しました: ${membersError.message}`);
+      }
+
+      // メンバーの月次収入を並列で取得
+      const memberIncomes = await Promise.all(
+        ((membersData || []) as unknown as MemberData[]).map(async (member) => {
+          const { data: budgetData, error: budgetError } = await supabase
+            .from("budgets")
+            .select("amount")
+            .eq("user_id", member.user_id)
+            .eq("month", currentMonth)
+            .single();
+
+          if (budgetError && budgetError.code !== "PGRST116") {
+            console.error('Debug: Budget error for user:', member.user_id, budgetError);
+          }
+
+          return {
+            user_id: member.user_id,
+            name: member.users?.name || '未設定',
+            monthly_income: budgetData?.amount || 0
+          };
+        })
+      );
+
+      setMembers(memberIncomes);
+
+      // 予算情報を取得
+      const { data: budgetData, error: budgetError } = await supabase
+        .from("group_budgets")
+        .select("amount, month")
+        .eq("group_id", params.groupId)
+        .eq("month", currentMonth)
+        .single();
+
+      if (budgetError && budgetError.code !== "PGRST116") {
+        throw budgetError;
+      }
+
+      setBudget(budgetData);
+    } catch (err) {
+      console.error("Error fetching data:", err);
+      setError(err instanceof Error ? err.message : "データの取得に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [params.groupId, selectedMonth]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        console.log('Debug: Starting data fetch');
-        const { data: { session } } = await supabase.auth.getSession();
-        console.log('Debug: Session:', session);
-
-        if (!session) {
-          router.push('/login');
-          return;
-        }
-
-        console.log('Debug: Fetching members data for group:', params.groupId);
-        // メンバー情報を取得（名前を含む）
-        const { data: membersData, error: membersError } = await supabase
-          .from("group_members")
-          .select(`
-            user_id,
-            users:user_id (
-              name
-            )
-          `)
-          .eq("group_id", params.groupId);
-
-        console.log('Debug: Members data:', membersData);
-        console.log('Debug: Members error:', membersError);
-
-        if (membersError) {
-          console.error('Debug: Members error details:', membersError);
-          throw membersError;
-        }
-
-        // 各メンバーの今月の収入を取得
-        const currentMonth = `${selectedMonth}-01`;
-        const memberIncomes = await Promise.all(
-          ((membersData || []) as unknown as MemberData[]).map(async (member) => {
-            const { data: budgetData, error: budgetError } = await supabase
-              .from("budgets")
-              .select("amount")
-              .eq("user_id", member.user_id)
-              .eq("month", currentMonth)
-              .single();
-
-            if (budgetError && budgetError.code !== "PGRST116") {
-              console.error('Debug: Budget error for user:', member.user_id, budgetError);
-            }
-
-            return {
-              user_id: member.user_id,
-              name: member.users?.name || '未設定',
-              monthly_income: budgetData?.amount || 0
-            };
-          })
-        );
-
-        setMembers(memberIncomes);
-
-        console.log('Debug: Fetching budget data for month:', selectedMonth);
-        // 予算情報を取得
-        const { data: budgetData, error: budgetError } = await supabase
-          .from("group_budgets")
-          .select("amount, month")
-          .eq("group_id", params.groupId)
-          .eq("month", `${selectedMonth}-01`)
-          .single();
-
-        console.log('Debug: Budget data:', budgetData);
-        console.log('Debug: Budget error:', budgetError);
-
-        if (budgetError && budgetError.code !== "PGRST116") {
-          console.error('Debug: Budget error details:', budgetError);
-          throw budgetError;
-        }
-        setBudget(budgetData);
-      } catch (err) {
-        console.error("Error fetching data:", err);
-        if (err instanceof Error) {
-          console.error("Error details:", {
-            message: err.message,
-            name: err.name,
-            stack: err.stack
-          });
-          setError(err.message);
-        } else {
-          console.error("Unknown error type:", err);
-          setError("データの取得に失敗しました");
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
-  }, [selectedMonth, router, params.groupId]);
+  }, [fetchData]);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -171,6 +147,8 @@ export default function GroupBudgetPage() {
     }
   };
 
+  const totalIncome = members.reduce((sum, member) => sum + member.monthly_income, 0);
+
   if (loading) {
     return (
       <AuthGuard>
@@ -195,33 +173,30 @@ export default function GroupBudgetPage() {
 
   return (
     <AuthGuard>
-      <div className="p-4 max-w-4xl mx-auto">
+      <div className="p-4">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">予算設定</h1>
           <Link
             href={`/groups/${params.groupId}`}
-            className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            className="text-blue-500 hover:text-blue-600"
           >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
             グループに戻る
           </Link>
         </div>
 
-        <div className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              月を選択
-            </label>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            月を選択
+          </label>
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
 
+        <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               予算額
@@ -260,49 +235,30 @@ export default function GroupBudgetPage() {
             </div>
           </div>
 
-          <div className="flex justify-end space-x-4">
-            {!isEditing ? (
-              <>
-                <button
-                  onClick={handleEdit}
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  編集
-                </button>
-              </>
-            ) : (
+          <div className="flex justify-end space-x-2">
+            {isEditing ? (
               <>
                 <button
                   onClick={handleCancel}
-                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
                 >
                   キャンセル
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
                 >
                   保存
                 </button>
               </>
+            ) : (
+              <button
+                onClick={handleEdit}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+              >
+                編集
+              </button>
             )}
-          </div>
-
-          {/* メンバーの収入セクション */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-lg font-semibold mb-4">メンバーの月収</h2>
-            <div className="space-y-3">
-              {members.map((member) => (
-                <div key={member.user_id} className="flex justify-between items-center p-3 bg-gray-50 rounded-md">
-                  <span className="text-gray-700">{member.name}</span>
-                  <span className="font-medium">¥{member.monthly_income.toLocaleString()}</span>
-                </div>
-              ))}
-              <div className="flex justify-between items-center p-3 bg-blue-50 rounded-md">
-                <span className="font-medium text-blue-700">合計月収</span>
-                <span className="font-medium text-blue-700">¥{totalIncome.toLocaleString()}</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>

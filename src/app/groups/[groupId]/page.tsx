@@ -62,6 +62,41 @@ interface Profile {
   // Add any other necessary properties for the Profile type
 }
 
+interface SupabaseMemberResponse {
+  user_id: string;
+  users: {
+    id: string;
+    name: string;
+  };
+  salaries: Array<{
+    id: number;
+    amount: number;
+    payday: number;
+  }>;
+}
+
+// キャッシュのインターフェース
+interface GroupCache {
+  group: Group | null;
+  transactions: Transaction[];
+  budgets: Budget[];
+  memberSalaries: Array<{
+    salary: {
+      id: number;
+      amount: number;
+      payday: number;
+    };
+    profile: {
+      id: string;
+      name: string;
+    };
+  }>;
+  timestamp: number;
+}
+
+// キャッシュの有効期限（5分）
+const CACHE_EXPIRY = 5 * 60 * 1000;
+
 export default function GroupHomePage(props: { params: Promise<{ groupId: string }> }) {
   const params = use(props.params);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -83,7 +118,6 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const router = useRouter();
   const { user, profile: authProfile } = useAuth();
-  console.log('Auth Profile:', authProfile);
 
   // 型を明示的に定義
   interface CategoryExpenses {
@@ -170,14 +204,54 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
     rotation: 0, // 開始位置を12時の位置に修正
   }), []);
 
+  // キャッシュの取得
+  const getCache = useCallback((): GroupCache | null => {
+    const cached = localStorage.getItem(`group_${params.groupId}_${selectedMonth}`);
+    if (!cached) return null;
+
+    const parsedCache = JSON.parse(cached);
+    if (Date.now() - parsedCache.timestamp > CACHE_EXPIRY) {
+      localStorage.removeItem(`group_${params.groupId}_${selectedMonth}`);
+      return null;
+    }
+
+    return parsedCache;
+  }, [params.groupId, selectedMonth]);
+
+  // キャッシュの保存
+  const setCache = useCallback((data: Omit<GroupCache, 'timestamp'>) => {
+    const cacheData = {
+      ...data,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(`group_${params.groupId}_${selectedMonth}`, JSON.stringify(cacheData));
+  }, [params.groupId, selectedMonth]);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
+        setLoading(false);
+        return;
+      }
+
+      // プロファイルがない場合はプロファイル設定ページにリダイレクト
+      if (!authProfile) {
+        console.log('No profile found, redirecting to profile setup...');
+        router.push('/profile/setup');
+        return;
+      }
+
+      // キャッシュをチェック
+      const cached = getCache();
+      if (cached) {
+        setGroup(cached.group);
+        setTransactions(cached.transactions);
+        setBudgets(cached.budgets);
+        setMemberSalaries(cached.memberSalaries);
         setLoading(false);
         return;
       }
@@ -194,8 +268,6 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         throw new Error(`グループ情報の取得に失敗しました: ${groupError.message}`);
       }
 
-      setGroup(groupData);
-
       // 取引データの取得
       const { data: transactionsData, error: transactionsError } = await supabase
         .from('transactions')
@@ -210,25 +282,33 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         throw new Error(`取引データの取得に失敗しました: ${transactionsError.message}`);
       }
 
-      setTransactions(transactionsData || []);
-
       // 予算データの取得
       const { data: budgetsData, error: budgetsError } = await supabase
         .from('group_budgets')
         .select('*')
-        .eq('group_id', params.groupId);
+        .eq('group_id', params.groupId)
+        .eq('month', `${selectedMonth}-01`);
 
       if (budgetsError) {
         console.error('Budgets fetch error:', budgetsError);
         throw new Error(`予算データの取得に失敗しました: ${budgetsError.message}`);
       }
 
-      setBudgets(budgetsData || []);
-
-      // グループメンバーの情報を取得
-      const { data: membersData, error: membersError } = await supabase
+      // メンバー情報の取得（一括で取得）
+      const { data: membersWithProfiles, error: membersError } = await supabase
         .from('group_members')
-        .select('user_id')
+        .select(`
+          user_id,
+          users!inner (
+            id,
+            name
+          ),
+          salaries!inner (
+            id,
+            amount,
+            payday
+          )
+        `)
         .eq('group_id', params.groupId);
 
       if (membersError) {
@@ -236,65 +316,35 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         throw new Error(`メンバー情報の取得に失敗しました: ${membersError.message}`);
       }
 
-      // メンバーのプロファイル情報を取得
-      const memberIds = membersData.map(member => member.user_id);
-      console.log('Member IDs:', memberIds);
-
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('id, name')
-        .in('id', memberIds);
-
-      if (usersError) {
-        console.error('Users fetch error:', usersError);
-        throw new Error(`ユーザー情報の取得に失敗しました: ${usersError.message}`);
-      }
-      console.log('Users data:', usersData);
-
-      // メンバーの給料情報を取得
-      const { data: salariesData, error: salariesError } = await supabase
-        .from('salaries')
-        .select('*')
-        .in('user_id', memberIds);
-
-      if (salariesError) {
-        console.error('Salaries fetch error:', salariesError);
-        throw new Error(`給料情報の取得に失敗しました: ${salariesError.message}`);
-      }
-      console.log('Salaries data:', salariesData);
-
-      // データを結合
-      const salaries = usersData
-        .map(user => {
-          const salary = salariesData.find(s => s.user_id === user.id);
-          console.log('User:', user);
-          console.log('Found salary:', salary);
-          return salary ? {
-            salary: {
-              id: salary.id,
-              amount: salary.amount,
-              payday: salary.payday
-            },
-            profile: {
-              id: user.id,
-              name: user.name
-            }
-          } : null;
-        })
-        .filter((item): item is {
+      // データを整形
+      const formattedSalaries = ((membersWithProfiles || []) as SupabaseMemberResponse[]).map(member => {
+        if (!member.users || !member.salaries?.[0]) return null;
+        return {
           salary: {
-            id: number;
-            amount: number;
-            payday: number;
-          };
+            id: member.salaries[0].id,
+            amount: member.salaries[0].amount,
+            payday: member.salaries[0].payday
+          },
           profile: {
-            id: string;
-            name: string;
-          };
-        } => item !== null);
+            id: member.users.id,
+            name: member.users.name
+          }
+        };
+      }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-      console.log('Combined salaries:', salaries);
-      setMemberSalaries(salaries);
+      // 状態を更新
+      setGroup(groupData);
+      setTransactions(transactionsData || []);
+      setBudgets(budgetsData || []);
+      setMemberSalaries(formattedSalaries);
+
+      // キャッシュを保存
+      setCache({
+        group: groupData,
+        transactions: transactionsData || [],
+        budgets: budgetsData || [],
+        memberSalaries: formattedSalaries
+      });
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -302,11 +352,23 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
     } finally {
       setLoading(false);
     }
-  }, [params.groupId, selectedMonth, router]);
+  }, [user, authProfile, params.groupId, selectedMonth, router, getCache, setCache]);
 
   useEffect(() => {
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    // プロファイルがない場合はプロファイル設定ページにリダイレクト
+    if (!authProfile) {
+      console.log('No profile found, redirecting to profile setup...');
+      router.push('/profile/setup');
+      return;
+    }
+
     fetchData();
-  }, [params.groupId]);
+  }, [user, authProfile, selectedMonth]);
 
   const handleNavigation = useCallback((path: string) => {
     setLoading(true);

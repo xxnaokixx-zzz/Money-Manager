@@ -57,7 +57,7 @@ export default function GroupTransactionsPage(props: { params: Promise<{ groupId
 
         // 給料情報を取得
         const { data: salaryData, error: salaryError } = await supabase
-          .from('salary_dates')
+          .from('salaries')
           .select('date, amount')
           .eq('user_id', user.id)
           .single();
