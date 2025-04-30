@@ -4,47 +4,20 @@ import { cookies } from 'next/headers';
 
 export async function POST(request: Request) {
   try {
-    console.log('Starting group creation...');
-    const cookieStore = await cookies();
-    console.log('Cookie store:', cookieStore);
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
-    // すべてのクッキーをログ出力
-    const allCookies = cookieStore.getAll();
-    console.log('All cookies:', allCookies);
+    // セッションを取得
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
-    console.log('Supabase client created');
-
-    // リクエストヘッダーをすべてログ出力
-    const headers = Object.fromEntries(request.headers.entries());
-    console.log('Request headers:', headers);
-
-    // リクエストヘッダーから認証トークンを取得
-    const authHeader = request.headers.get('Authorization');
-    console.log('Auth header:', authHeader);
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('No valid authorization header');
-      return NextResponse.json({ error: '認証情報が見つかりません' }, { status: 401 });
-    }
-
-    const accessToken = authHeader.split(' ')[1];
-    console.log('Access token from header:', accessToken);
-
-    // トークンを直接使用してユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser(accessToken);
-    console.log('User data:', user, 'User error:', userError);
-
-    if (userError || !user) {
-      console.error('User authentication error:', userError);
-      return NextResponse.json({ error: '認証エラーが発生しました', details: userError?.message }, { status: 401 });
+    if (sessionError || !session) {
+      console.error('Session error:', sessionError);
+      return NextResponse.json({ error: '認証エラーが発生しました' }, { status: 401 });
     }
 
     const { name, description } = await request.json();
-    console.log('Request data:', { name, description });
 
     if (!name) {
-      console.log('Name is required');
       return NextResponse.json({ error: 'グループ名は必須です' }, { status: 400 });
     }
 
@@ -55,25 +28,21 @@ export async function POST(request: Request) {
         {
           name,
           description,
-          created_by: user.id,
+          created_by: session.user.id,
         }
       ])
       .select()
       .single();
 
-    console.log('Group creation result:', { group, groupError });
-
     if (groupError) {
       console.error('Group creation error:', groupError);
       return NextResponse.json({
         error: 'グループの作成に失敗しました',
-        details: groupError.message,
-        code: groupError.code
+        details: groupError.message
       }, { status: 500 });
     }
 
     if (!group) {
-      console.error('No group data returned');
       return NextResponse.json({
         error: 'グループの作成に失敗しました',
         details: 'グループデータが返されませんでした'
@@ -85,12 +54,10 @@ export async function POST(request: Request) {
       .insert([
         {
           group_id: Number(group.id),
-          user_id: user.id,
+          user_id: session.user.id,
           role: 'owner',
         }
       ]);
-
-    console.log('Member addition result:', { memberError });
 
     if (memberError) {
       console.error('Member addition error:', memberError);
@@ -101,20 +68,17 @@ export async function POST(request: Request) {
         .eq('id', group.id);
 
       return NextResponse.json({
-        error: 'グループメンバーの追加に失敗しました',
-        details: memberError.message,
-        code: memberError.code
+        error: 'メンバーの追加に失敗しました',
+        details: memberError.message
       }, { status: 500 });
     }
 
-    console.log('Group created successfully');
-    return NextResponse.json(group);
+    return NextResponse.json({ group });
   } catch (error) {
-    console.error('Error in group creation:', error);
-    const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('Unexpected error:', error);
     return NextResponse.json({
-      error: 'グループの作成に失敗しました',
-      details: errorMessage
+      error: '予期せぬエラーが発生しました',
+      details: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

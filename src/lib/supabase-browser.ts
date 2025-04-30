@@ -29,31 +29,13 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: {
-      getItem: (key) => {
-        try {
-          const item = storage.getItem(key);
-          return item ? JSON.parse(item) : null;
-        } catch (error) {
-          console.error('Error reading from storage:', error);
-          return null;
-        }
-      },
-      setItem: (key, value) => {
-        try {
-          storage.setItem(key, JSON.stringify(value));
-        } catch (error) {
-          console.error('Error writing to storage:', error);
-        }
-      },
-      removeItem: (key) => {
-        try {
-          storage.removeItem(key);
-        } catch (error) {
-          console.error('Error removing from storage:', error);
-        }
-      }
+    detectSessionInUrl: false,
+    storage: storage,
+    flowType: 'pkce'
+  },
+  global: {
+    headers: {
+      'X-Client-Info': 'money-app'
     }
   }
 })
