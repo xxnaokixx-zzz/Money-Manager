@@ -85,8 +85,35 @@ export default function Home() {
     description: ''
   });
   const router = useRouter();
-  const { user, profile: authProfile } = useAuth();
-  console.log('Auth Profile:', authProfile);
+  const { user, profile: authProfile, loading: authLoading } = useAuth();
+
+  // 認証状態のデバッグログ（開発環境のみ）
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Auth state:', { user, profile: authProfile, loading: authLoading });
+    }
+  }, [user, authProfile, authLoading]);
+
+  // 認証状態に基づく処理
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, authLoading, router]);
+
+  // ローディング中の表示
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  // 認証されていない場合
+  if (!user) {
+    return null;
+  }
 
   // 型を明示的に定義
   interface CategoryExpenses {

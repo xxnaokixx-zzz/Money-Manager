@@ -56,12 +56,6 @@ interface Salary {
   user_id: string;
 }
 
-interface Profile {
-  id: string;
-  name: string;
-  // Add any other necessary properties for the Profile type
-}
-
 interface SupabaseMemberResponse {
   user_id: string;
   users: Array<{
@@ -86,7 +80,7 @@ interface GroupCache {
       amount: number;
       payday: number;
     };
-    profile: {
+    user: {
       id: string;
       name: string;
     };
@@ -108,7 +102,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
       amount: number;
       payday: number;
     };
-    profile: {
+    user: {
       id: string;
       name: string;
     };
@@ -238,13 +232,6 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         return;
       }
 
-      // プロファイルがない場合はプロファイル設定ページにリダイレクト
-      if (!authProfile) {
-        console.log('No profile found, redirecting to profile setup...');
-        router.push('/profile/setup');
-        return;
-      }
-
       // キャッシュをチェック
       const cached = getCache();
       if (cached) {
@@ -295,7 +282,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
       }
 
       // メンバー情報の取得（一括で取得）
-      const { data: membersWithProfiles, error: membersError } = await supabase
+      const { data: membersWithUsers, error: membersError } = await supabase
         .from('group_members')
         .select(`
           user_id,
@@ -317,7 +304,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
       }
 
       // データを整形
-      const formattedSalaries = ((membersWithProfiles || []) as SupabaseMemberResponse[]).map(member => {
+      const formattedSalaries = ((membersWithUsers || []) as SupabaseMemberResponse[]).map(member => {
         if (!member.users?.[0] || !member.salaries?.[0]) return null;
         return {
           salary: {
@@ -325,7 +312,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
             amount: member.salaries[0].amount,
             payday: member.salaries[0].payday
           },
-          profile: {
+          user: {
             id: member.users[0].id,
             name: member.users[0].name
           }
@@ -352,7 +339,7 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
     } finally {
       setLoading(false);
     }
-  }, [user, authProfile, params.groupId, selectedMonth, router, getCache, setCache]);
+  }, [user, params.groupId, selectedMonth, router, getCache, setCache]);
 
   useEffect(() => {
     if (!user) {
@@ -360,15 +347,8 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
       return;
     }
 
-    // プロファイルがない場合はプロファイル設定ページにリダイレクト
-    if (!authProfile) {
-      console.log('No profile found, redirecting to profile setup...');
-      router.push('/profile/setup');
-      return;
-    }
-
     fetchData();
-  }, [user, authProfile, selectedMonth]);
+  }, [user, selectedMonth]);
 
   const handleNavigation = useCallback((path: string) => {
     setLoading(true);
@@ -650,10 +630,10 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">メンバーの給料情報</h2>
           <div className="space-y-6">
-            {memberSalaries.map(({ salary, profile }) => (
-              <div key={profile.id} className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
+            {memberSalaries.map(({ salary, user }) => (
+              <div key={user.id} className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
                 <h3 className="text-md font-medium text-gray-800 mb-3">
-                  {profile.name}
+                  {user.name}
                   <span className="text-sm text-gray-500 ml-2">さんの給料情報</span>
                 </h3>
                 <div className="space-y-3">

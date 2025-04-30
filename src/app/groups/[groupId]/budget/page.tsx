@@ -48,11 +48,11 @@ export default function GroupBudgetPage() {
       const { data: membersData, error: membersError } = await supabase
         .from('group_members')
         .select(`
-          user_id,
+            user_id,
           users (
-            name
-          )
-        `)
+              name
+            )
+          `)
         .eq('group_id', params.groupId);
 
       if (membersError) {

@@ -86,13 +86,18 @@ export default function SalaryPage() {
 
         if (groupError) throw groupError;
 
+        if (!groups || groups.length === 0) {
+          throw new Error('所属するグループが見つかりません');
+        }
+
         const { error } = await supabase
           .from('salaries')
           .insert([{
             amount: parseInt(amount),
             payday: parseInt(payday),
             last_paid: new Date().toISOString().split('T')[0],
-            user_id: user.id
+            user_id: user.id,
+            group_id: groups[0].id  // 最初のグループのIDを設定
           }]);
 
         if (error) throw error;

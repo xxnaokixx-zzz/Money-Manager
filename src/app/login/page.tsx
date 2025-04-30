@@ -16,10 +16,18 @@ export default function LoginPage() {
   useEffect(() => {
     // 既にログインしている場合はリダイレクト
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const redirectTo = searchParams.get('redirectTo') || '/';
-        router.push(redirectTo);
+      try {
+        if (typeof window === 'undefined') return;
+
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (session) {
+          const redirectTo = searchParams.get('redirectTo') || '/';
+          router.push(redirectTo);
+        }
+      } catch (error) {
+        console.error('Session check error:', error);
       }
     };
     checkSession();
@@ -27,24 +35,32 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (typeof window === 'undefined') return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      // セッションをクリア
+      await supabase.auth.signOut();
+
+      // ログイン処理
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      const redirectTo = searchParams.get('redirectTo') || '/';
-      router.push(redirectTo);
+      if (data.session) {
+        // リダイレクト
+        const redirectTo = searchParams.get('redirectTo') || '/';
+        router.push(redirectTo);
+        router.refresh();
+      }
     } catch (error) {
-      console.error('Error logging in:', error);
-      setError('ログインに失敗しました');
+      console.error('Login error:', error);
+      setError('ログインに失敗しました。メールアドレスとパスワードを確認してください。');
     } finally {
       setLoading(false);
     }
@@ -74,6 +90,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -88,36 +105,24 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
+                disabled={loading}
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full inline-flex items-center justify-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  ログイン中...
-                </>
-              ) : (
-                'ログイン'
-              )}
+              {loading ? 'ログイン中...' : 'ログイン'}
             </button>
-          </form>
 
-          <div className="text-center mt-4">
-            <p className="text-gray-600">
-              アカウントをお持ちでないですか？{' '}
-              <Link href="/signup" className="text-blue-500 hover:text-blue-600">
-                新規登録
+            <div className="text-center mt-4">
+              <Link href="/signup" className="text-blue-600 hover:text-blue-700">
+                アカウントをお持ちでない方はこちら
               </Link>
-            </p>
-          </div>
+            </div>
+          </form>
         </div>
       </div>
     </main>

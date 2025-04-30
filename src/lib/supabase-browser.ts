@@ -3,11 +3,58 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
+// メモリストレージの実装
+class MemoryStorage {
+  private store: { [key: string]: string } = {};
+
+  getItem(key: string) {
+    return this.store[key] || null;
+  }
+
+  setItem(key: string, value: string) {
+    this.store[key] = value;
+  }
+
+  removeItem(key: string) {
+    delete this.store[key];
+  }
+}
+
+// ストレージの初期化
+const storage = (typeof window !== 'undefined' && window.localStorage)
+  ? window.localStorage
+  : new MemoryStorage();
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    storage: {
+      getItem: (key) => {
+        try {
+          const item = storage.getItem(key);
+          return item ? JSON.parse(item) : null;
+        } catch (error) {
+          console.error('Error reading from storage:', error);
+          return null;
+        }
+      },
+      setItem: (key, value) => {
+        try {
+          storage.setItem(key, JSON.stringify(value));
+        } catch (error) {
+          console.error('Error writing to storage:', error);
+        }
+      },
+      removeItem: (key) => {
+        try {
+          storage.removeItem(key);
+        } catch (error) {
+          console.error('Error removing from storage:', error);
+        }
+      }
+    }
   }
 })
 

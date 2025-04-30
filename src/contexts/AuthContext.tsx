@@ -29,9 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   initialized: false,
 });
 
-const SESSION_CACHE_KEY = 'auth_session';
-const PROFILE_CACHE_KEY = 'user_profile';
-const CACHE_EXPIRY = 5 * 60 * 1000; // 5分
+const isClient = typeof window !== 'undefined';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -43,10 +41,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [lastFetch, setLastFetch] = useState(0);
 
   const clearAuthData = useCallback(() => {
-    localStorage.removeItem(SESSION_CACHE_KEY);
-    localStorage.removeItem(PROFILE_CACHE_KEY);
-    localStorage.removeItem('session_cache_time');
-    localStorage.removeItem('profile_cache_time');
+    if (isClient) {
+      try {
+        localStorage.clear();
+      } catch (error) {
+        console.error('Error clearing localStorage:', error);
+      }
+    }
     setUser(null);
     setProfile(null);
   }, []);
@@ -54,95 +55,146 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const handleAuthError = useCallback(async () => {
     clearAuthData();
     await supabase.auth.signOut();
-    router.push('/login');
-  }, [clearAuthData, router]);
+    if (pathname !== '/login') {
+      router.push('/login');
+    }
+  }, [clearAuthData, router, pathname]);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = useCallback(async () => {
     try {
+      console.log('Starting fetchProfile...');
+      const { data: authUser, error: authError } = await supabase.auth.getUser();
+
+      if (authError || !authUser?.user?.id) {
+        console.error('Auth user fetch error:', authError || 'No user');
+        return null;
+      }
+
+      const userId = authUser.user.id;
+      console.log('Auth user ID:', userId);
+      console.log('Auth user data:', authUser);
+
       const { data, error } = await supabase
         .from('users')
         .select('id, name, avatar_url, email, created_at')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        console.error('Error fetching user:', error);
+        console.error('Error fetching user profile:', error);
+        console.error('Error details:', error.message, error.details);
         return null;
       }
 
+      if (!data) {
+        console.error('No profile found for user:', userId);
+        return null;
+      }
+
+      console.log('Successfully fetched profile:', data);
       return data;
     } catch (error) {
       console.error('Error in fetchProfile:', error);
+      if (error instanceof Error) {
+        console.error('Error stack:', error.stack);
+      }
       return null;
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const now = Date.now();
-        if (now - lastFetch < 1000) {
-          return;
-        }
-        setLastFetch(now);
+  const initializeAuth = useCallback(async () => {
+    try {
+      console.log('Starting initializeAuth...');
+      const { data: { session }, error } = await supabase.auth.getSession();
 
-        const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('Session error:', error);
+        await handleAuthError();
+        return;
+      }
 
-        if (error) {
-          console.error('Session error:', error);
-          if (error.message.includes('Invalid Refresh Token')) {
-            await handleAuthError();
-            return;
-          }
-          throw error;
-        }
-
-        if (!session) {
+      if (!session) {
+        console.log('No session found');
+        if (pathname !== '/login' && pathname !== '/signup') {
           await handleAuthError();
-          return;
         }
+        return;
+      }
 
-        setUser(session.user);
-        const profile = await fetchProfile(session.user.id);
-        if (profile) {
-          setProfile(profile);
-        } else if (pathname !== '/users/setup') {
+      console.log('Session found:', session);
+      console.log('Session user:', session.user);
+      setUser(session.user);
+
+      const profile = await fetchProfile();
+      if (profile) {
+        console.log('Profile found:', profile);
+        setProfile(profile);
+        console.log('Profile state updated:', profile);
+      } else {
+        console.log('No profile found');
+        if (pathname !== '/users/setup') {
           router.push('/users/setup');
         }
-        setInitialized(true);
-      } catch (error) {
-        console.error('Error checking session:', error);
-        await handleAuthError();
-      } finally {
-        setLoading(false);
       }
-    };
+    } catch (error) {
+      console.error('Error in initializeAuth:', error);
+      if (error instanceof Error) {
+        console.error('Error stack:', error.stack);
+      }
+      await handleAuthError();
+    } finally {
+      setLoading(false);
+      setInitialized(true);
+      console.log('Auth initialization completed');
+    }
+  }, [fetchProfile, handleAuthError, pathname, router]);
 
-    checkSession();
+  useEffect(() => {
+    if (!isClient) {
+      console.log('Not in client environment, skipping auth initialization');
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastFetch < 1000) {
+      console.log('Skipping auth initialization due to rate limit');
+      return;
+    }
+    setLastFetch(now);
+
+    console.log('Starting auth initialization...');
+    initializeAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session) => {
-      console.log('Auth state changed:', event, session);
+      console.log('Auth state changed:', event);
+      console.log('New session:', session);
 
       if (event === 'SIGNED_OUT') {
+        console.log('User signed out');
         await handleAuthError();
         return;
       }
 
       if (session) {
+        console.log('New session detected, updating user state');
         setUser(session.user);
-        const profile = await fetchProfile(session.user.id);
+        const profile = await fetchProfile();
         if (profile) {
+          console.log('Profile found after auth state change:', profile);
           setProfile(profile);
+          console.log('Profile state updated after auth change:', profile);
         } else if (pathname !== '/users/setup') {
+          console.log('No profile found, redirecting to setup');
           router.push('/users/setup');
         }
       }
     });
 
     return () => {
+      console.log('Cleaning up auth subscription');
       subscription.unsubscribe();
     };
-  }, [router, lastFetch, handleAuthError, pathname]);
+  }, [initializeAuth, lastFetch, handleAuthError, pathname, router, fetchProfile]);
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, initialized }}>
