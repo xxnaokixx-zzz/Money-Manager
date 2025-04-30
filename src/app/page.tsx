@@ -65,10 +65,32 @@ interface CacheData {
   timestamp: number;
 }
 
+// 集計用の型定義
+interface CategoryExpenses {
+  [key: string]: number;
+}
+
+interface TransactionSummary {
+  totalIncome: number;
+  totalExpense: number;
+  categoryExpenses: CategoryExpenses;
+}
+
+interface ChartData {
+  labels: string[];
+  datasets: {
+    data: number[];
+    backgroundColor: string[];
+    borderWidth: number;
+  }[];
+}
+
 // キャッシュの有効期限（5分）
 const CACHE_EXPIRY = 5 * 60 * 1000;
 
 export default function Home() {
+  const router = useRouter();
+  const { user, profile: authProfile, loading: authLoading } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [salary, setSalary] = useState<Salary | null>(null);
@@ -84,56 +106,9 @@ export default function Home() {
     date: new Date().toISOString().split('T')[0],
     description: ''
   });
-  const router = useRouter();
-  const { user, profile: authProfile, loading: authLoading } = useAuth();
-
-  // 認証状態のデバッグログ（開発環境のみ）
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Auth state:', { user, profile: authProfile, loading: authLoading });
-    }
-  }, [user, authProfile, authLoading]);
-
-  // 認証状態に基づく処理
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/login');
-    }
-  }, [user, authLoading, router]);
-
-  // ローディング中の表示
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  // 認証されていない場合
-  if (!user) {
-    return null;
-  }
-
-  // 型を明示的に定義
-  interface CategoryExpenses {
-    [key: string]: number;
-  }
-
-  interface TransactionSummary {
-    totalIncome: number;
-    totalExpense: number;
-    categoryExpenses: CategoryExpenses;
-  }
-
-  interface ChartData {
-    labels: string[];
-    datasets: {
-      data: number[];
-      backgroundColor: string[];
-      borderWidth: number;
-    }[];
-  }
+  const [cache, setCache] = useState<CacheData | null>(null);
+  const [lastSalaryAddition, setLastSalaryAddition] = useState<Date | null>(null);
+  const [isAddingSalary, setIsAddingSalary] = useState(false);
 
   const { totalIncome, totalExpense, categoryExpenses } = useMemo<TransactionSummary>(() => {
     const income = transactions
@@ -195,12 +170,19 @@ export default function Home() {
     rotation: 0, // 開始位置を12時の位置に修正
   }), []);
 
-  // キャッシュの初期化
-  const [cache, setCache] = useState<CacheData | null>(null);
+  // 認証状態のデバッグログ（開発環境のみ）
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Auth state:', { user, profile: authProfile, loading: authLoading });
+    }
+  }, [user, authProfile, authLoading]);
 
-  // 給与の自動追加を管理するための状態
-  const [lastSalaryAddition, setLastSalaryAddition] = useState<Date | null>(null);
-  const [isAddingSalary, setIsAddingSalary] = useState(false);
+  // 認証状態に基づく処理
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [user, authLoading, router]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -434,7 +416,7 @@ export default function Home() {
         setIsAddingSalary(false);
       }
     }
-  }, [isAddingSalary, lastSalaryAddition]);
+  }, [isAddingSalary, lastSalaryAddition, fetchData]);
 
   // 日付が同じ日かどうかを判定するヘルパー関数
   const isSameDay = (date1: Date, date2: Date): boolean => {
