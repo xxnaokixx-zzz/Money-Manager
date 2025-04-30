@@ -74,7 +74,7 @@ export async function GET() {
 
         const { data: newGroupAmount, error: groupRpcError } = await supabase.rpc('increment_group_budget', {
           p_amount: salary.amount,
-          p_group_id: member.group_id.toString()
+          p_group_id: member.group_id
         });
 
         if (groupRpcError) {
@@ -84,18 +84,7 @@ export async function GET() {
 
         console.log(`Group budget updated: Group ID=${member.group_id}, New Amount=${newGroupAmount}`);
 
-        const { error: groupBudgetError } = await supabase
-          .from('group_budgets')
-          .update({ amount: newGroupAmount })
-          .eq('group_id', member.group_id)
-          .eq('month', currentMonth);
-
-        if (groupBudgetError) {
-          console.error(`Error updating group budget for group ${member.group_id}:`, groupBudgetError);
-          continue;
-        }
-
-        console.log(`Group budget final update complete: Group ID=${member.group_id}`);
+        console.log(`Group budget update complete: Group ID=${member.group_id}`);
       }
 
       // 取引履歴に給与を追加
