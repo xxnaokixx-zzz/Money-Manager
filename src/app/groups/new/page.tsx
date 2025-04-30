@@ -20,35 +20,13 @@ export default function NewGroupPage() {
     try {
       console.log('Starting group creation...');
 
-      // セッションを取得
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      console.log('Session:', session, 'Session error:', sessionError);
-
-      if (sessionError) {
-        console.error('Session error:', sessionError);
-        throw new Error("認証エラーが発生しました");
-      }
-
-      if (!session) {
-        console.log('No session found, redirecting to login...');
-        router.push('/login');
-        return;
-      }
-
-      // トークンを取得
-      const token = session.access_token;
-      if (!token) {
-        console.error('No token found');
-        throw new Error("認証トークンが見つかりません");
-      }
-
       console.log('Sending request to create group...');
       const response = await fetch("/api/groups", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
         },
+        credentials: "include",
         body: JSON.stringify({
           name,
           description,
