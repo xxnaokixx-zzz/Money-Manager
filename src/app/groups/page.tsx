@@ -19,6 +19,29 @@ interface Group {
   created_at: string;
   created_by: string | null;
   members: GroupMember[];
+  creator?: {
+    name: string;
+  };
+}
+
+interface RawGroupMember {
+  user_id: string;
+  role: string;
+  user?: {
+    name: string;
+  };
+}
+
+interface RawGroup {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  created_by: string;
+  creator?: {
+    name: string;
+  };
+  members: RawGroupMember[];
 }
 
 export default function GroupsPage() {
@@ -47,23 +70,27 @@ export default function GroupsPage() {
 
         if (error) throw error;
 
-        const formattedGroups = data.map((group: any) => ({
-          ...group,
-          members: [
-            {
-              user_id: group.created_by,
-              name: group.creator?.name || '',
-              role: 'owner'
-            },
-            ...(Array.isArray(group.members)
-              ? group.members.map((m: any) => ({
-                user_id: m.user_id,
-                name: m.user?.name || '',
-                role: m.role,
-              }))
-              : [])
-          ],
-        }));
+        const formattedGroups: Group[] = (data as RawGroup[]).map((group) => {
+          const otherMembers = Array.isArray(group.members)
+            ? group.members.filter((m: RawGroupMember) => m.user_id !== group.created_by).map((m: RawGroupMember) => ({
+              user_id: m.user_id,
+              name: m.user?.name || '',
+              role: m.role,
+            }))
+            : [];
+
+          return {
+            ...group,
+            members: [
+              {
+                user_id: group.created_by,
+                name: group.creator?.name || '',
+                role: 'owner'
+              },
+              ...otherMembers
+            ],
+          };
+        });
 
         setGroups(formattedGroups);
       } catch (err) {

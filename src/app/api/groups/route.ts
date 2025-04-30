@@ -2,6 +2,14 @@ import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
+interface GroupMember {
+  user_id: string;
+  role: string;
+  user?: {
+    name: string;
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const cookieStore = cookies();
@@ -119,25 +127,29 @@ export async function GET(request: Request) {
     }
 
     // メンバーのuser_idとnameを配列で返す（作成者を含む）
-    const groupsWithMembers = groups.map((group) => ({
-      ...group,
-      members: [
-        // 作成者を管理者として追加
-        {
-          user_id: group.created_by,
-          name: group.creator?.name || '',
-          role: 'owner'
-        },
-        // その他のメンバーを追加
-        ...(Array.isArray(group.members)
-          ? group.members.map((m: any) => ({
-            user_id: m.user_id,
-            name: m.user?.name || '',
-            role: m.role,
-          }))
-          : [])
-      ],
-    }));
+    const groupsWithMembers = groups.map((group) => {
+      // group.membersから作成者を除外
+      const otherMembers = Array.isArray(group.members)
+        ? group.members.filter((m: GroupMember) => m.user_id !== group.created_by).map((m: GroupMember) => ({
+          user_id: m.user_id,
+          name: m.user?.name || '',
+          role: m.role,
+        }))
+        : [];
+
+      return {
+        ...group,
+        members: [
+          // 作成者を管理者として追加
+          {
+            user_id: group.created_by,
+            name: group.creator?.name || '',
+            role: 'owner'
+          },
+          ...otherMembers
+        ],
+      };
+    });
 
     return NextResponse.json(groupsWithMembers);
   } catch (error) {
