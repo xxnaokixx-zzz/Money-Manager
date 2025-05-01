@@ -74,6 +74,8 @@ interface TransactionSummary {
   totalIncome: number;
   totalExpense: number;
   categoryExpenses: CategoryExpenses;
+  salaryIncome: number;
+  otherIncome: number;
 }
 
 interface ChartData {
@@ -110,25 +112,35 @@ export default function Home() {
   const [lastSalaryAddition, setLastSalaryAddition] = useState<Date | null>(null);
   const [isAddingSalary, setIsAddingSalary] = useState(false);
 
-  const { totalIncome, totalExpense, categoryExpenses } = useMemo<TransactionSummary>(() => {
+  const { totalIncome, totalExpense, categoryExpenses, salaryIncome, otherIncome } = useMemo<TransactionSummary>(() => {
     console.log('Calculating totals from transactions:', transactions);
     console.log('Raw transactions data for income calculation:', transactions.map(t => ({
       type: t.type,
       amount: t.amount,
-      date: t.date
+      date: t.date,
+      category: t.categories?.name
     })));
 
-    const income = transactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => {
-        console.log('Adding income:', { amount: t.amount, date: t.date });
-        return sum + t.amount;
-      }, 0);
+    // 給与収入とその他の収入を分けて計算
+    const salaryIncome = transactions
+      .filter(t => t.type === 'income' && t.categories?.name === '給与')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const otherIncome = transactions
+      .filter(t => t.type === 'income' && t.categories?.name !== '給与')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalIncome = salaryIncome + otherIncome;
+
     const expense = transactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    console.log('Calculated income total:', income);
+    console.log('Calculated income breakdown:', {
+      salary: salaryIncome,
+      other: otherIncome,
+      total: totalIncome
+    });
 
     // カテゴリーごとの支出を計算
     const categoryExpenses: CategoryExpenses = transactions
@@ -140,30 +152,34 @@ export default function Home() {
       }, {} as CategoryExpenses);
 
     return {
-      totalIncome: income,
+      totalIncome,
       totalExpense: expense,
-      categoryExpenses
+      categoryExpenses,
+      salaryIncome,
+      otherIncome
     };
   }, [transactions]);
 
   // 予算と収支の計算
   const budgetCalculations = useMemo(() => {
-    const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
+    const baseBudget = budgets.length > 0 ? budgets[0].amount : 0;
+    // 予算額に給与以外の収入を加算
+    const adjustedBudget = baseBudget + otherIncome;
     const usedAmount = totalExpense;
-    const remainingAmount = Math.max(0, budgetAmount - usedAmount);
+    const remainingAmount = Math.max(0, adjustedBudget - usedAmount);
 
     return {
-      budgetAmount,
+      baseBudget,
+      adjustedBudget,
       usedAmount,
       remainingAmount
     };
-  }, [totalExpense, budgets]);
+  }, [budgets, otherIncome, totalExpense]);
 
   // チャートデータの作成
   const chartData: ChartData = useMemo(() => {
-    const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
     const usedAmount = totalExpense;
-    const remainingAmount = Math.max(0, budgetAmount - usedAmount);
+    const remainingAmount = Math.max(0, budgetCalculations.adjustedBudget - usedAmount);
 
     return {
       labels: ['使用済み', '残り'],
@@ -179,7 +195,7 @@ export default function Home() {
         borderWidth: 0,
       }]
     };
-  }, [totalExpense, budgets]);
+  }, [totalExpense, budgetCalculations]);
 
   // チャートのオプション設定
   const chartOptions = useMemo(() => ({
@@ -603,40 +619,12 @@ export default function Home() {
                 </Suspense>
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-gray-800">
-                      ¥{budgetCalculations.remainingAmount.toLocaleString()}
-                    </div>
-                    <div className="text-sm text-gray-600">
+                    <div className="text-base font-semibold text-gray-800 mb-1">
                       残り
                     </div>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2 w-full">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">予算額</span>
-                  <span className="text-gray-600">
-                    ¥{(budgets.length > 0 ? budgets[0].amount : 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">収入</span>
-                  <span className="text-emerald-600">
-                    +¥{totalIncome.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">支出</span>
-                  <span className="text-red-500">
-                    -¥{totalExpense.toLocaleString()}
-                  </span>
-                </div>
-                <div className="border-t border-slate-200 pt-2 mt-2">
-                  <div className="flex justify-between text-sm font-medium">
-                    <span>収支</span>
-                    <span className={totalIncome - totalExpense >= 0 ? "text-emerald-600" : "text-red-500"}>
-                      ¥{(totalIncome - totalExpense).toLocaleString()}
-                    </span>
+                    <div className="text-2xl font-bold text-gray-900">
+                      ¥{budgetCalculations.remainingAmount.toLocaleString()}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -648,106 +636,58 @@ export default function Home() {
           <h2 className="text-lg font-semibold mb-4 text-slate-900">今月の収支</h2>
           <div className="space-y-4">
             <div>
-              <div className="text-sm text-slate-700">収入</div>
-              <div className="text-2xl font-bold text-emerald-700">
-                ¥{totalIncome.toLocaleString()}
-              </div>
+              <Link
+                href="/transactions"
+                className="block hover:bg-slate-50 -mx-4 px-4 py-2"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavigation('/transactions');
+                }}
+              >
+                <div className="text-base font-semibold text-gray-900">予算（給与を含む）</div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {budgets.length > 0 ? (
+                    `¥${(budgets[0].amount + otherIncome).toLocaleString()}`
+                  ) : (
+                    <span className="text-gray-500">設定されていません</span>
+                  )}
+                </div>
+              </Link>
             </div>
-            <div>
-              <div className="text-sm text-slate-700">支出</div>
-              <div className="text-2xl font-bold text-red-700">
-                ¥{totalExpense.toLocaleString()}
-              </div>
-            </div>
-            <div className="border-t border-slate-200 pt-4">
-              <div className="text-sm text-slate-700">収支</div>
-              <div className="text-2xl font-bold text-slate-900">
-                ¥{(totalIncome - totalExpense).toLocaleString()}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-900">最近の取引</h2>
-          <div className="flex space-x-2">
-            <Link
-              href="/add"
-              className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-            >
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              追加
-            </Link>
-            <Link
-              href="/transactions"
-              className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-            >
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-              すべて表示
-            </Link>
+            <div className="border-t border-slate-200 pt-4">
+              <div>
+                <Link
+                  href="/transactions/income"
+                  className="block hover:bg-slate-50 -mx-4 px-4 py-2"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleNavigation('/transactions/income');
+                  }}
+                >
+                  <div className="text-base font-semibold text-gray-900">収入（給与以外）</div>
+                  <div className="text-2xl font-bold text-emerald-700">
+                    +¥{otherIncome.toLocaleString()}
+                  </div>
+                </Link>
+              </div>
+              <div>
+                <Link
+                  href="/transactions/expense"
+                  className="block hover:bg-slate-50 -mx-4 px-4 py-2"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleNavigation('/transactions/expense');
+                  }}
+                >
+                  <div className="text-base font-semibold text-gray-900">支出</div>
+                  <div className="text-2xl font-bold text-red-700">
+                    -¥{totalExpense.toLocaleString()}
+                  </div>
+                </Link>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                  日付
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                  カテゴリー
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                  金額
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
-              {transactions
-                .slice(0, 5)
-                .map((transaction) => (
-                  <tr key={transaction.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                      {new Date(transaction.date).toLocaleDateString('ja-JP')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                      {transaction.categories?.name || '未分類'}
-                    </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                      }`}>
-                      {transaction.type === 'income' ? '+' : '-'}
-                      ¥{transaction.amount.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
         </div>
       </div>
 

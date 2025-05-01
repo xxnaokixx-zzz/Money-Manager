@@ -21,7 +21,7 @@ interface Transaction {
   };
 }
 
-export default function AllTransactions() {
+export default function IncomeTransactions() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -62,6 +62,7 @@ export default function AllTransactions() {
             )
           `)
           .eq('user_id', user.id)
+          .eq('type', 'income')
           .gte('date', firstDay)
           .lte('date', lastDayStr)
           .order('date', { ascending: false })
@@ -80,13 +81,7 @@ export default function AllTransactions() {
     fetchTransactions();
   }, [router, selectedMonth]);
 
-  const totalIncome = transactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpense = transactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = transactions.reduce((sum, t) => sum + t.amount, 0);
 
   if (loading) {
     return (
@@ -111,10 +106,10 @@ export default function AllTransactions() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-bold text-gray-800">取引履歴</h1>
+        <h1 className="text-2xl font-bold text-gray-800">収入履歴</h1>
         <div className="flex space-x-2">
           <Link
-            href="/add"
+            href="/add?type=income"
             className="inline-flex items-center px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
           >
             <svg
@@ -130,7 +125,7 @@ export default function AllTransactions() {
                 d="M12 4v16m8-8H4"
               />
             </svg>
-            取引を追加
+            収入を追加
           </Link>
           <Link
             href="/"
@@ -157,18 +152,10 @@ export default function AllTransactions() {
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-200">
           <div className="flex justify-between items-center">
-            <div className="space-y-4">
-              <div>
-                <div className="text-sm text-slate-700">収入合計</div>
-                <div className="text-2xl font-bold text-emerald-700">
-                  +¥{totalIncome.toLocaleString()}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-700">支出合計</div>
-                <div className="text-2xl font-bold text-red-700">
-                  -¥{totalExpense.toLocaleString()}
-                </div>
+            <div>
+              <div className="text-sm text-slate-700">今月の収入合計</div>
+              <div className="text-2xl font-bold text-emerald-700">
+                +¥{totalIncome.toLocaleString()}
               </div>
             </div>
             <input
@@ -188,9 +175,6 @@ export default function AllTransactions() {
                   日付
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                  種類
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
                   カテゴリー
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
@@ -208,15 +192,10 @@ export default function AllTransactions() {
                     {new Date(transaction.date).toLocaleDateString('ja-JP')}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {transaction.type === 'income' ? '収入' : '支出'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                     {transaction.categories?.name || '未分類'}
                   </td>
-                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                    }`}>
-                    {transaction.type === 'income' ? '+' : '-'}
-                    ¥{transaction.amount.toLocaleString()}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-emerald-700">
+                    +¥{transaction.amount.toLocaleString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                     {transaction.description || '-'}

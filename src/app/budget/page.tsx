@@ -200,52 +200,48 @@ export default function BudgetPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center">
-        <p>読み込み中...</p>
-      </main>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-      <div className="max-w-2xl mx-auto px-4 py-8 md:py-12">
-        <div className="mb-8">
-          <button
-            onClick={() => handleNavigation('/')}
-            className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors mr-4"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            ホームに戻る
-          </button>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">
-            {profile?.name ? `${profile.name}さんの予算設定` : '予算設定'}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            月ごとの予算を設定して、支出管理を始めましょう。
-          </p>
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="mb-8 flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-800">予算設定</h1>
+        <Link
+          href="/"
+          className="inline-flex items-center px-4 py-2 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+        >
+          戻る
+        </Link>
+      </div>
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg">
+          {error}
         </div>
+      )}
 
-        {error && <div className="text-red-500 mb-4">{error}</div>}
-
-        <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6">
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              月を選択
+              対象月
             </label>
             <select
               value={selectedMonth}
               onChange={handleMonthChange}
-              className="w-full p-3 border rounded-md text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             >
               {Array.from({ length: 12 }, (_, i) => {
-                const now = new Date();
-                const year = now.getFullYear();
-                const month = now.getMonth() + i;
-                const date = new Date(year, month, 1);
-                const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                const label = `${date.getFullYear()}年${date.getMonth() + 1}月`;
+                const date = new Date();
+                date.setMonth(date.getMonth() + i);
+                const value = format(date, 'yyyy-MM');
+                const label = format(date, 'yyyy年M月');
                 return (
                   <option key={value} value={value}>
                     {label}
@@ -255,134 +251,68 @@ export default function BudgetPage() {
             </select>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                予算額
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">¥</span>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    value={editedAmount}
-                    onChange={(e) => setEditedAmount(e.target.value)}
-                    className="w-full pl-8 p-3 border rounded-md text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="予算額を入力"
-                    required
-                    min="0"
-                  />
-                ) : (
-                  <div className="w-full pl-8 p-3 border rounded-md text-base bg-gray-50">
-                    {budget ? Number(budget.amount).toLocaleString() : '未設定'}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-md">
-              <div className="text-sm text-gray-600 mb-2">今月の収入</div>
-              <div className="text-lg font-medium text-emerald-600">
-                ¥{totalIncome.toLocaleString()}
-              </div>
-            </div>
-
-            <div className="bg-blue-50 p-4 rounded-md">
-              <div className="text-sm text-gray-600 mb-2">利用可能額</div>
-              <div className="text-lg font-medium text-blue-600">
-                ¥{((budget?.amount || 0) + totalIncome).toLocaleString()}
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-4">
-              {!isEditing ? (
-                <>
-                  <button
-                    onClick={async () => {
-                      if (window.confirm('予算をリセットしますか？\n※この月の給与による収入も削除されます')) {
-                        try {
-                          const { data: { user } } = await supabase.auth.getUser();
-                          if (!user) {
-                            router.push('/login');
-                            return;
-                          }
-
-                          // 予算をリセット
-                          const { error: budgetError } = await supabase
-                            .from('budgets')
-                            .delete()
-                            .eq('user_id', user.id)
-                            .eq('month', `${selectedMonth}-01`);
-
-                          if (budgetError) throw budgetError;
-
-                          // この月の給与による収入を削除
-                          const [year, month] = selectedMonth.split('-').map(Number);
-                          const lastDay = new Date(year, month, 0).getDate();
-                          const currentMonthStart = `${selectedMonth}-01`;
-                          const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-                          const { error: transactionError } = await supabase
-                            .from('transactions')
-                            .delete()
-                            .eq('user_id', user.id)
-                            .eq('type', 'income')
-                            .eq('category_id', 1) // 給与カテゴリー
-                            .gte('date', currentMonthStart)
-                            .lte('date', currentMonthEnd);
-
-                          if (transactionError) throw transactionError;
-
-                          setBudget(null);
-                          setEditedAmount('');
-                          setTotalIncome(0);
-                          alert('予算をリセットしました');
-                        } catch (error) {
-                          console.error('Error resetting budget:', error);
-                          setError('予算のリセットに失敗しました');
-                        }
-                      }
-                    }}
-                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-                  >
-                    リセット
-                  </button>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  予算額
+                </label>
+                {!isEditing && (
                   <button
                     onClick={handleEdit}
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    className="text-sm text-blue-600 hover:text-blue-700"
                   >
                     編集
                   </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={handleCancel}
-                    className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
-                  >
-                    キャンセル
-                  </button>
+                )}
+              </div>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">¥</span>
+                    <input
+                      type="number"
+                      value={editedAmount}
+                      onChange={(e) => setEditedAmount(e.target.value)}
+                      className="block w-full rounded-md border-gray-300 pl-8 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      placeholder="予算額を入力"
+                    />
+                  </div>
                   <button
                     onClick={handleSave}
-                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
                   >
                     保存
                   </button>
-                </>
+                  <button
+                    onClick={handleCancel}
+                    className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              ) : (
+                <div className="text-2xl font-bold text-gray-900">
+                  {budget ? (
+                    `¥${budget.amount.toLocaleString()}`
+                  ) : (
+                    <span className="text-gray-500">設定されていません</span>
+                  )}
+                </div>
               )}
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <div className="text-sm font-medium text-gray-700 mb-2">
+                今月の収入
+              </div>
+              <div className="text-2xl font-bold text-emerald-600">
+                ¥{totalIncome.toLocaleString()}
+              </div>
             </div>
           </div>
         </div>
-
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-blue-800 mb-2">予算設定のヒント</h2>
-          <ul className="list-disc list-inside text-blue-700 space-y-2">
-            <li>収入を基準に予算を設定しましょう</li>
-            <li>固定費（家賃、光熱費など）を考慮に入れましょう</li>
-            <li>貯金の目標も含めて設定することをお勧めします</li>
-          </ul>
-        </div>
       </div>
-    </main>
+    </div>
   );
 } 

@@ -103,8 +103,8 @@ BEGIN
     SELECT 1 FROM pg_policies WHERE tablename = 'salaries' AND policyname = 'enable_salary_access'
   ) THEN
     EXECUTE 'CREATE POLICY "enable_salary_access" ON salaries
-      FOR ALL TO authenticated
-      USING (user_id = auth.uid())
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid())
       WITH CHECK (user_id = auth.uid())';
   END IF;
 END $$;
@@ -116,8 +116,8 @@ BEGIN
     SELECT 1 FROM pg_policies WHERE tablename = 'salary_additions' AND policyname = 'enable_salary_additions_access'
   ) THEN
     EXECUTE 'CREATE POLICY "enable_salary_additions_access" ON salary_additions
-      FOR ALL TO authenticated
-      USING (user_id = auth.uid())
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid())
       WITH CHECK (user_id = auth.uid())';
   END IF;
 END $$;
