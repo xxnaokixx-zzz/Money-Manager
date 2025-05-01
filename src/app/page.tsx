@@ -111,12 +111,24 @@ export default function Home() {
   const [isAddingSalary, setIsAddingSalary] = useState(false);
 
   const { totalIncome, totalExpense, categoryExpenses } = useMemo<TransactionSummary>(() => {
+    console.log('Calculating totals from transactions:', transactions);
+    console.log('Raw transactions data for income calculation:', transactions.map(t => ({
+      type: t.type,
+      amount: t.amount,
+      date: t.date
+    })));
+
     const income = transactions
       .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => {
+        console.log('Adding income:', { amount: t.amount, date: t.date });
+        return sum + t.amount;
+      }, 0);
     const expense = transactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
+
+    console.log('Calculated income total:', income);
 
     // カテゴリーごとの支出を計算
     const categoryExpenses: CategoryExpenses = transactions
@@ -134,22 +146,35 @@ export default function Home() {
     };
   }, [transactions]);
 
-  // チャート用のデータを準備
+  // 予算と収支の計算
+  const budgetCalculations = useMemo(() => {
+    const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
+    const usedAmount = totalExpense;
+    const remainingAmount = Math.max(0, budgetAmount - usedAmount);
+
+    return {
+      budgetAmount,
+      usedAmount,
+      remainingAmount
+    };
+  }, [totalExpense, budgets]);
+
+  // チャートデータの作成
   const chartData: ChartData = useMemo(() => {
     const budgetAmount = budgets.length > 0 ? budgets[0].amount : 0;
-    const remainingAmount = Math.max(0, budgetAmount - totalExpense);
-    const isUnderBudget = totalExpense < budgetAmount;
+    const usedAmount = totalExpense;
+    const remainingAmount = Math.max(0, budgetAmount - usedAmount);
 
     return {
       labels: ['使用済み', '残り'],
       datasets: [{
         data: [
-          totalExpense,
+          usedAmount,
           remainingAmount
         ],
         backgroundColor: [
-          isUnderBudget ? '#EF4444' : '#10B981',  // 予算を下回る場合は赤、予算以上は緑
-          '#10B981',  // 残りは常に緑
+          '#EF4444',  // 支出は赤
+          '#10B981',  // 残りは緑
         ],
         borderWidth: 0,
       }]
@@ -167,7 +192,7 @@ export default function Home() {
         enabled: false,
       },
     },
-    rotation: 0, // 開始位置を12時の位置に修正
+    rotation: 0,
   }), []);
 
   // 認証状態のデバッグログ（開発環境のみ）
@@ -194,6 +219,25 @@ export default function Home() {
         return;
       }
 
+      console.log('Fetching data for user:', user.id);
+      console.log('Selected month:', selectedMonth);
+
+      // 月の最初の日と最後の日を計算
+      const [year, month] = selectedMonth.split('-').map(Number);
+      // 次の月の0日目 = 今月の最終日
+      const lastDay = new Date(year, month, 0).getDate();
+      const firstDay = `${selectedMonth}-01`;
+      const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+
+      console.log('Date range calculated:', {
+        year,
+        month,
+        firstDay,
+        lastDay,
+        lastDayStr,
+        currentDate: new Date().toISOString().split('T')[0]
+      });
+
       // データ取得を並列実行
       const [transactionsData, budgetsData, salaryData, userData] = await Promise.all([
         supabase
@@ -207,14 +251,17 @@ export default function Home() {
             )
           `)
           .eq('user_id', user.id)
-          .gte('date', `${selectedMonth}-01`)
-          .lte('date', new Date(new Date(`${selectedMonth}-01`).getFullYear(), new Date(`${selectedMonth}-01`).getMonth() + 1, 0).toISOString().split('T')[0])
-          .order('date', { ascending: false }),
+          .gte('date', firstDay)
+          .lte('date', lastDayStr)
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false }),
         supabase
           .from('budgets')
           .select('*')
           .eq('user_id', user.id)
-          .eq('month', `${selectedMonth}-01`),
+          .eq('month', `${selectedMonth}-01`)
+          .order('created_at', { ascending: false })
+          .limit(1),
         supabase
           .from('salaries')
           .select('*')
@@ -227,13 +274,68 @@ export default function Home() {
           .single()
       ]);
 
-      if (transactionsData.error) throw transactionsData.error;
-      if (budgetsData.error) throw budgetsData.error;
-      if (salaryData.error && salaryData.error.code !== 'PGRST116') throw salaryData.error;
-      if (userData.error) throw userData.error;
+      // 各データの取得結果を詳細にログ出力
+      console.log('Transactions query result:', {
+        data: transactionsData.data,
+        error: transactionsData.error,
+        count: transactionsData.data?.length,
+        dateRange: { firstDay, lastDayStr }
+      });
 
-      setTransactions(transactionsData.data || []);
-      setBudgets(budgetsData.data || []);
+      // 予算データの詳細をログ出力
+      console.log('Budget query details:', {
+        month: `${selectedMonth}-01`,
+        userId: user.id,
+        result: {
+          data: budgetsData.data,
+          error: budgetsData.error,
+          status: budgetsData.status,
+          statusText: budgetsData.statusText
+        }
+      });
+
+      if (transactionsData.error) {
+        console.error('Error fetching transactions:', transactionsData.error);
+        throw transactionsData.error;
+      }
+      if (budgetsData.error) {
+        console.error('Error fetching budgets:', budgetsData.error);
+        throw budgetsData.error;
+      }
+      if (salaryData.error && salaryData.error.code !== 'PGRST116') {
+        console.error('Error fetching salary:', salaryData.error);
+        throw salaryData.error;
+      }
+      if (userData.error) {
+        console.error('Error fetching user:', userData.error);
+        throw userData.error;
+      }
+
+      const transactions = transactionsData.data || [];
+      const budgets = budgetsData.data || [];
+
+      // 取得した予算データの詳細をログ出力
+      if (budgets.length > 0) {
+        console.log('Current budget:', {
+          amount: budgets[0].amount,
+          month: budgets[0].month,
+          created_at: budgets[0].created_at,
+          updated_at: budgets[0].updated_at,
+          user_id: budgets[0].user_id
+        });
+      } else {
+        console.log('No budget found for the current month');
+      }
+
+      console.log('Setting state with:', {
+        transactionsCount: transactions.length,
+        budgetsCount: budgets.length,
+        hasSalary: !!salaryData.data,
+        hasUser: !!userData.data
+      });
+
+      setTransactions(transactions);
+      setBudgets(budgets);
       setSalary(salaryData.data);
       setProfile(userData.data);
 
@@ -242,7 +344,7 @@ export default function Home() {
         type: '個人'
       });
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error in fetchData:', error);
       setError('データの取得に失敗しました');
     } finally {
       setLoading(false);
@@ -252,7 +354,17 @@ export default function Home() {
   // 初期データ取得
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, selectedMonth]);
+
+  // データの更新を監視
+  useEffect(() => {
+    console.log('Data updated:', {
+      transactions,
+      budgets,
+      totalIncome,
+      totalExpense
+    });
+  }, [transactions, budgets, totalIncome, totalExpense]);
 
   // リンクのプリフェッチ
   useEffect(() => {
@@ -264,172 +376,6 @@ export default function Home() {
     };
     prefetchLinks();
   }, [router]);
-
-  const checkAndAddSalary = useCallback(async (salary: Salary): Promise<void> => {
-    // 既に処理中の場合や、今日すでに処理済みの場合はスキップ
-    if (isAddingSalary || (lastSalaryAddition && isSameDay(lastSalaryAddition, new Date()))) {
-      return;
-    }
-
-    const today = new Date();
-    const lastPaid = new Date(salary.last_paid);
-    const currentDay = today.getDate();
-
-    // 給与日で、かつ最終支払日が今月より前の場合のみ実行
-    if (currentDay === salary.payday &&
-      (lastPaid.getMonth() !== today.getMonth() ||
-        lastPaid.getFullYear() !== today.getFullYear())) {
-
-      try {
-        setIsAddingSalary(true);
-        setLastSalaryAddition(today);
-
-        // トランザクションの開始を確認
-        const { data: existingTransaction, error: transactionCheckError } = await supabase
-          .from('transactions')
-          .select('id')
-          .eq('user_id', salary.user_id)
-          .eq('type', 'income')
-          .eq('description', '給与')
-          .gte('date', today.toISOString().split('T')[0])
-          .single();
-
-        if (transactionCheckError && transactionCheckError.code !== 'PGRST116') {
-          throw transactionCheckError;
-        }
-
-        // 今日の給与が既に追加されている場合はスキップ
-        if (existingTransaction) {
-          console.log('Salary already added today');
-          return;
-        }
-
-        const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-        const todayDate = new Date();
-
-        // 個人の予算を更新
-        const { data: budgetData, error: budgetError } = await supabase
-          .from('budgets')
-          .select('*')
-          .eq('user_id', salary.user_id)
-          .eq('month', `${currentMonthStr}-01`)
-          .single();
-
-        if (budgetError && budgetError.code !== 'PGRST116') {
-          throw budgetError;
-        }
-
-        // 予算の更新または新規作成
-        if (budgetData) {
-          const { error: updateError } = await supabase
-            .from('budgets')
-            .update({ amount: budgetData.amount + salary.amount })
-            .eq('id', budgetData.id);
-
-          if (updateError) throw updateError;
-        } else {
-          const { error: insertError } = await supabase
-            .from('budgets')
-            .insert([{
-              amount: salary.amount,
-              month: `${currentMonthStr}-01`,
-              user_id: salary.user_id
-            }]);
-
-          if (insertError) throw insertError;
-        }
-
-        // グループの予算を更新
-        const { data: groupMembers, error: groupMembersError } = await supabase
-          .from('group_members')
-          .select('group_id')
-          .eq('user_id', salary.user_id);
-
-        if (groupMembersError) throw groupMembersError;
-
-        // グループ予算の更新とトランザクションの追加を直列処理に変更
-        for (const member of groupMembers) {
-          // グループ予算の更新
-          const { error: groupRpcError } = await supabase.rpc('increment_group_budget', {
-            p_amount: salary.amount,
-            p_group_id: member.group_id
-          });
-          if (groupRpcError) throw groupRpcError;
-
-          // グループの取引履歴に給与を追加
-          const { error: groupTransactionError } = await supabase
-            .from('transactions')
-            .insert({
-              user_id: salary.user_id,
-              group_id: member.group_id,
-              amount: salary.amount,
-              type: 'income',
-              category_id: 1,
-              date: todayDate.toISOString().split('T')[0],  // 日付をYYYY-MM-DD形式に変更
-              description: '給与'
-            });
-
-          if (groupTransactionError) throw groupTransactionError;
-        }
-
-        // 最終支払日の更新
-        const { error: salaryError } = await supabase
-          .from('salaries')
-          .update({ last_paid: todayDate.toISOString().split('T')[0] })
-          .eq('id', salary.id);
-
-        if (salaryError) throw salaryError;
-
-        // 個人の取引履歴に給与を追加
-        const { error: transactionError } = await supabase
-          .from('transactions')
-          .insert({
-            user_id: salary.user_id,
-            amount: salary.amount,
-            type: 'income',
-            category_id: 1,
-            date: todayDate.toISOString().split('T')[0],
-            description: '給与'
-          });
-
-        if (transactionError) throw transactionError;
-
-        // 給料加算履歴を記録
-        const { error: historyError } = await supabase
-          .from('salary_additions')
-          .insert({
-            user_id: salary.user_id,
-            amount: salary.amount,
-            date: todayDate.toISOString().split('T')[0]
-          });
-
-        if (historyError) throw historyError;
-
-        fetchData();
-      } catch (err) {
-        console.error('Error adding salary:', err);
-        setError('給料の自動追加に失敗しました');
-        // エラーが発生した場合は状態をリセット
-        setIsAddingSalary(false);
-        setLastSalaryAddition(null);
-      } finally {
-        setIsAddingSalary(false);
-      }
-    }
-  }, [isAddingSalary, lastSalaryAddition, fetchData]);
-
-  // 日付が同じ日かどうかを判定するヘルパー関数
-  const isSameDay = (date1: Date, date2: Date): boolean => {
-    return date1.getFullYear() === date2.getFullYear() &&
-      date1.getMonth() === date2.getMonth() &&
-      date1.getDate() === date2.getDate();
-  };
-
-  useEffect(() => {
-    if (salary && !isAddingSalary) {
-      checkAndAddSalary(salary);
-    }
-  }, [salary, checkAndAddSalary, isAddingSalary]);
 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -457,7 +403,7 @@ export default function Home() {
         user_id: user.id
       };
 
-      console.log('Saving transaction:', transactionData); // デバッグ用
+      console.log('Saving transaction:', transactionData);
 
       const { error } = await supabase
         .from('transactions')
@@ -491,6 +437,7 @@ export default function Home() {
         if (budgetError) throw budgetError;
       }
 
+      // フォームをリセット
       setNewTransaction({
         type: 'expense',
         amount: '',
@@ -498,7 +445,9 @@ export default function Home() {
         date: new Date().toISOString().split('T')[0],
         description: ''
       });
-      fetchData();
+
+      // データを再取得
+      await fetchData();
     } catch (error) {
       console.error('Error adding transaction:', error);
       setError('取引の追加に失敗しました');
@@ -655,7 +604,7 @@ export default function Home() {
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-gray-800">
-                      ¥{Math.max(0, (budgets[0].amount - totalExpense)).toLocaleString()}
+                      ¥{budgetCalculations.remainingAmount.toLocaleString()}
                     </div>
                     <div className="text-sm text-gray-600">
                       残り
@@ -667,7 +616,7 @@ export default function Home() {
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">予算額</span>
                   <span className="text-gray-600">
-                    ¥{budgets[0].amount.toLocaleString()}
+                    ¥{(budgets.length > 0 ? budgets[0].amount : 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -684,9 +633,9 @@ export default function Home() {
                 </div>
                 <div className="border-t border-slate-200 pt-2 mt-2">
                   <div className="flex justify-between text-sm font-medium">
-                    <span>利用可能額</span>
-                    <span className="text-blue-600">
-                      ¥{Math.max(0, budgets[0].amount - totalExpense).toLocaleString()}
+                    <span>収支</span>
+                    <span className={totalIncome - totalExpense >= 0 ? "text-emerald-600" : "text-red-500"}>
+                      ¥{(totalIncome - totalExpense).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -780,21 +729,23 @@ export default function Home() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
-              {transactions.slice(0, 5).map((transaction) => (
-                <tr key={transaction.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {new Date(transaction.date).toLocaleDateString('ja-JP')}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {transaction.categories?.name || '未分類'}
-                  </td>
-                  <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                    }`}>
-                    {transaction.type === 'income' ? '+' : '-'}
-                    ¥{transaction.amount.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
+              {transactions
+                .slice(0, 5)
+                .map((transaction) => (
+                  <tr key={transaction.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      {new Date(transaction.date).toLocaleDateString('ja-JP')}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      {transaction.categories?.name || '未分類'}
+                    </td>
+                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
+                      }`}>
+                      {transaction.type === 'income' ? '+' : '-'}
+                      ¥{transaction.amount.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>

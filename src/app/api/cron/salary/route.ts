@@ -25,15 +25,15 @@ export async function GET() {
       );
     }
 
-    // テスト用に日付を5月1日に固定
-    const today = new Date('2025-05-01');
+    const today = new Date();
+    const currentDay = today.getDate();
+    const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
 
     // 給与情報を取得
     const { data: salaries, error: salariesError } = await supabase
       .from('salaries')
       .select('*')
-      .eq('payday', today.getDate())
-      .not('group_id', 'is', null);
+      .eq('payday', currentDay);
 
     if (salariesError) {
       console.error('Error fetching salaries:', salariesError);
@@ -64,16 +64,16 @@ export async function GET() {
       );
     }
 
-    // 各ユーザーの給与を並列処理で処理
+    // 各ユーザーの給与を処理
     const results = await Promise.allSettled(
       salaries.map(async (salary) => {
         try {
-          // ストアドプロシージャを呼び出し
-          const { error: rpcError } = await supabase.rpc('add_salary', {
+          // トランザクションを開始
+          const { error: rpcError } = await supabase.rpc('process_salary', {
             p_user_id: salary.user_id,
-            p_group_id: salary.group_id,
             p_amount: salary.amount,
-            p_date: today.toISOString().split('T')[0]
+            p_date: today.toISOString().split('T')[0],
+            p_current_month: currentMonth
           });
 
           if (rpcError) throw rpcError;
@@ -105,12 +105,9 @@ export async function GET() {
     );
 
   } catch (error) {
-    console.error('Error in salary cron job:', error);
+    console.error('Error in salary processing:', error);
     return new NextResponse(
-      JSON.stringify({
-        error: '内部エラーが発生しました',
-        details: error instanceof Error ? error.message : String(error)
-      }),
+      JSON.stringify({ error: '内部エラーが発生しました' }),
       {
         status: 500,
         headers: {

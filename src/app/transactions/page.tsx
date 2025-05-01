@@ -25,7 +25,14 @@ export default function TransactionsPage() {
   const [salaryInfo, setSalaryInfo] = useState<{
     date: string;
     amount: number;
+    user_id: string;
   } | null>(null);
+  const [salaryHistory, setSalaryHistory] = useState<Array<{
+    date: string;
+    amount: number;
+    user_id: string;
+    group_id: number;
+  }>>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -40,15 +47,31 @@ export default function TransactionsPage() {
           return;
         }
 
-        // 給料情報を取得
+        // 特定のユーザーIDの給料情報を取得
         const { data: salaryData, error: salaryError } = await supabase
           .from('salaries')
-          .select('date, amount')
-          .eq('user_id', user.id)
+          .select('date, amount, user_id')
+          .eq('user_id', '223b958f-bb7e-45d7-9880-5c0a2e9220be')
           .single();
 
         if (!salaryError && salaryData) {
           setSalaryInfo(salaryData);
+        }
+
+        // グループID 31の給与自動加算履歴を取得
+        const { data: historyData, error: historyError } = await supabase
+          .from('salary_additions')
+          .select(`
+            date,
+            amount,
+            user_id,
+            group_id
+          `)
+          .eq('group_id', 31)
+          .order('date', { ascending: false });
+
+        if (!historyError && historyData) {
+          setSalaryHistory(historyData);
         }
 
         // 選択された月の最初の日と最後の日を計算
@@ -193,6 +216,12 @@ export default function TransactionsPage() {
             <h2 className="text-lg font-semibold text-gray-800 mb-4">給料情報</h2>
             <div className="space-y-4">
               <div>
+                <div className="text-sm text-gray-500">ユーザーID</div>
+                <div className="text-lg font-medium text-gray-900">
+                  {salaryInfo.user_id}
+                </div>
+              </div>
+              <div>
                 <div className="text-sm text-gray-500">今月の給料日</div>
                 <div className="text-lg font-medium text-gray-900">
                   {new Date(salaryInfo.date).toLocaleDateString('ja-JP')}
@@ -204,6 +233,32 @@ export default function TransactionsPage() {
                   ¥{salaryInfo.amount.toLocaleString()}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {salaryHistory.length > 0 && (
+          <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 mb-8">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">グループID 31の給与自動加算履歴</h2>
+            <div className="space-y-4">
+              {salaryHistory.map((history, index) => (
+                <div key={index} className="flex justify-between items-center">
+                  <div>
+                    <div className="text-sm text-gray-500">
+                      {new Date(history.date).toLocaleDateString('ja-JP')}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      ユーザーID: {history.user_id}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      グループID: {history.group_id}
+                    </div>
+                  </div>
+                  <div className="text-lg font-medium text-gray-900">
+                    ¥{history.amount.toLocaleString()}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
