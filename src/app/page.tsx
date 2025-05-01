@@ -100,7 +100,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ownerInfo, setOwnerInfo] = useState<{ name: string; type: string } | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [displayDate, setDisplayDate] = useState(new Date());
   const [newTransaction, setNewTransaction] = useState({
     type: 'expense' as 'income' | 'expense',
     amount: '',
@@ -109,17 +113,17 @@ export default function Home() {
     description: ''
   });
   const [cache, setCache] = useState<CacheData | null>(null);
-  const [lastSalaryAddition, setLastSalaryAddition] = useState<Date | null>(null);
-  const [isAddingSalary, setIsAddingSalary] = useState(false);
 
   const { totalIncome, totalExpense, categoryExpenses, salaryIncome, otherIncome } = useMemo<TransactionSummary>(() => {
-    console.log('Calculating totals from transactions:', transactions);
-    console.log('Raw transactions data for income calculation:', transactions.map(t => ({
-      type: t.type,
-      amount: t.amount,
-      date: t.date,
-      category: t.categories?.name
-    })));
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Calculating totals from transactions:', transactions);
+      console.log('Raw transactions data for income calculation:', transactions.map(t => ({
+        type: t.type,
+        amount: t.amount,
+        date: t.date,
+        category: t.categories?.name
+      })));
+    }
 
     // 給与収入とその他の収入を分けて計算
     const salaryIncome = transactions
@@ -136,11 +140,15 @@ export default function Home() {
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    console.log('Calculated income breakdown:', {
-      salary: salaryIncome,
-      other: otherIncome,
-      total: totalIncome
-    });
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Calculated income breakdown:', {
+        salary: salaryIncome,
+        other: otherIncome,
+        total: totalIncome,
+        selectedMonth,
+        transactionCount: transactions.length
+      });
+    }
 
     // カテゴリーごとの支出を計算
     const categoryExpenses: CategoryExpenses = transactions
@@ -280,7 +288,7 @@ export default function Home() {
           .limit(1),
         supabase
           .from('salaries')
-          .select('*')
+          .select('id, amount, payday, last_paid, user_id')
           .eq('user_id', user.id)
           .single(),
         supabase
@@ -693,31 +701,126 @@ export default function Home() {
 
       {salary && (
         <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">給料情報</h2>
-          <div className="space-y-4">
-            <div>
-              <div className="text-sm text-gray-500">次の給料日</div>
-              <div className="text-lg font-medium text-gray-900">
-                {(() => {
-                  const today = new Date();
-                  const year = today.getFullYear();
-                  const month = today.getMonth();
-                  const payday = salary.payday;
-                  let nextPayday = new Date(year, month, payday);
-                  if (today > nextPayday) {
-                    // 今月の給料日を過ぎていれば来月
-                    nextPayday = new Date(year, month + 1, payday);
-                  }
-                  const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                  return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
-                })()}
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
+            <div className="flex items-center">
+              <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+              <span className="text-sm text-slate-600">給料日設定</span>
+            </div>
+          </div>
+          <div className="flex justify-between items-center gap-8">
+            <div className="flex-1 space-y-6">
+              <div>
+                <div className="text-base text-gray-500">次の給料日</div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {(() => {
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = today.getMonth();
+                    const payday = salary.payday;
+                    let nextPayday = new Date(year, month, payday);
+                    if (today > nextPayday) {
+                      nextPayday = new Date(year, month + 1, payday);
+                    }
+                    const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    return (
+                      <>
+                        {nextPayday.getMonth() + 1}月{payday}日
+                        <span className="ml-2 text-base font-normal text-slate-600">
+                          （あと{diffDays}日）
+                        </span>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+              <div>
+                <div className="text-base text-gray-500">給料額</div>
+                <div className="text-2xl font-bold text-slate-900">
+                  ¥{salary.amount.toLocaleString()}
+                </div>
               </div>
             </div>
-            <div>
-              <div className="text-sm text-gray-500">給料額</div>
-              <div className="text-lg font-medium text-gray-900">
-                ¥{salary.amount.toLocaleString()}
+            <div className="flex-1">
+              <div className="bg-slate-50 rounded-lg p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <button
+                    onClick={() => {
+                      const newDate = new Date(displayDate);
+                      newDate.setMonth(newDate.getMonth() - 1);
+                      setDisplayDate(newDate);
+                    }}
+                    className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div className="font-medium text-slate-700">
+                    {displayDate.getFullYear()}年{displayDate.getMonth() + 1}月
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newDate = new Date(displayDate);
+                      newDate.setMonth(newDate.getMonth() + 1);
+                      setDisplayDate(newDate);
+                    }}
+                    className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                  {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
+                    <div key={day} className="text-slate-500 font-medium">
+                      {day}
+                    </div>
+                  ))}
+                  {(() => {
+                    const firstDay = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
+                    const lastDay = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
+                    const days = [];
+                    const today = new Date();
+
+                    // 月初めの空白を追加
+                    for (let i = 0; i < firstDay.getDay(); i++) {
+                      days.push(<div key={`empty-${i}`} />);
+                    }
+
+                    // 日付を追加
+                    for (let i = 1; i <= lastDay.getDate(); i++) {
+                      const isPayday = i === salary.payday;
+                      const isToday = i === today.getDate() &&
+                        today.getMonth() === displayDate.getMonth() &&
+                        today.getFullYear() === displayDate.getFullYear();
+
+                      days.push(
+                        <div
+                          key={i}
+                          className="relative"
+                        >
+                          <div
+                            className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
+                              ${isPayday ? 'bg-blue-500 text-white font-bold' : ''}
+                              ${isToday && !isPayday ? 'border-2 border-slate-300' : ''}
+                              ${!isPayday && !isToday ? 'text-slate-700' : ''}
+                            `}
+                          >
+                            {i}
+                          </div>
+                          {i === salary.payday && (
+                            <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return days;
+                  })()}
+                </div>
               </div>
             </div>
           </div>
