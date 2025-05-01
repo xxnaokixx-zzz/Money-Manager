@@ -564,7 +564,10 @@ export default function Home() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+        <div
+          className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 cursor-pointer hover:bg-gray-50"
+          onClick={() => handleNavigation('/budget')}
+        >
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-800">
               予算状況
@@ -579,7 +582,7 @@ export default function Home() {
                 href="/budget"
                 className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
                 onClick={(e) => {
-                  e.preventDefault();
+                  e.stopPropagation();
                   handleNavigation('/budget');
                 }}
               >

@@ -21,7 +21,7 @@ export default function SalaryPage() {
 
   useEffect(() => {
     fetchSalary();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchSalary = async () => {
     try {

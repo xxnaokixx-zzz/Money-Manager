@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase-browser';
@@ -15,6 +15,7 @@ interface Transaction {
   category: string;
   date: string;
   description?: string;
+  user_id: string;
   group_id: string;
   categories?: {
     id: string;
@@ -23,7 +24,7 @@ interface Transaction {
   };
 }
 
-export default function GroupTransactionsPage() {
+export default function GroupIncomeTransactions() {
   const router = useRouter();
   const params = useParams();
   const { user } = useAuth();
@@ -34,98 +35,48 @@ export default function GroupTransactionsPage() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  useEffect(() => {
-    const fetchTransactions = async () => {
-      try {
-        setLoading(true);
+  const fetchTransactions = useCallback(async () => {
+    try {
+      setLoading(true);
 
-        // 月の最初の日と最後の日を計算
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const lastDay = new Date(year, month, 0).getDate();
-        const firstDay = `${selectedMonth}-01`;
-        const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+      // 月の最初の日と最後の日を計算
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const firstDay = `${selectedMonth}-01`;
+      const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
 
-        const { data, error } = await supabase
-          .from('transactions')
-          .select(`
-            *,
-            categories (
-              id,
-              name,
-              type
-            )
-          `)
-          .eq('group_id', params.groupId as string)
-          .gte('date', firstDay)
-          .lte('date', lastDayStr)
-          .order('date', { ascending: false })
-          .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          categories (
+            id,
+            name,
+            type
+          )
+        `)
+        .eq('group_id', params.groupId as string)
+        .eq('type', 'income')
+        .gte('date', firstDay)
+        .lte('date', lastDayStr)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false });
 
-        if (error) throw error;
-        setTransactions(data || []);
-      } catch (error) {
-        console.error('Error fetching transactions:', error);
-        setError('データの取得に失敗しました');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTransactions();
+      if (error) throw error;
+      setTransactions(data || []);
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      setError('データの取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
   }, [params.groupId, selectedMonth]);
 
-  const totalIncome = transactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpense = transactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const handleTransactionClick = (transaction: Transaction) => {
-    setSelectedTransaction(transaction);
-    setIsEditModalOpen(true);
-  };
-
-  const handleTransactionUpdate = () => {
-    // 取引一覧を再取得
-    const fetchTransactions = async () => {
-      try {
-        setLoading(true);
-
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const lastDay = new Date(year, month, 0).getDate();
-        const firstDay = `${selectedMonth}-01`;
-        const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-        const { data, error } = await supabase
-          .from('transactions')
-          .select(`
-            *,
-            categories (
-              id,
-              name,
-              type
-            )
-          `)
-          .eq('group_id', params.groupId as string)
-          .gte('date', firstDay)
-          .lte('date', lastDayStr)
-          .order('date', { ascending: false })
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setTransactions(data || []);
-      } catch (error) {
-        console.error('Error fetching transactions:', error);
-        setError('データの取得に失敗しました');
-      } finally {
-        setLoading(false);
-      }
-    };
-
+  useEffect(() => {
     fetchTransactions();
-  };
+  }, [fetchTransactions]);
+
+  const totalIncome = transactions.reduce((sum, t) => sum + t.amount, 0);
 
   if (loading) {
     return (
@@ -155,10 +106,10 @@ export default function GroupTransactionsPage() {
     <AuthGuard>
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-800">取引履歴</h1>
+          <h1 className="text-2xl font-bold text-gray-800">収入履歴</h1>
           <div className="flex space-x-2">
             <Link
-              href={`/groups/${params.groupId}/add`}
+              href={`/groups/${params.groupId}/add?type=income`}
               className="inline-flex items-center px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
             >
               <svg
@@ -174,7 +125,7 @@ export default function GroupTransactionsPage() {
                   d="M12 4v16m8-8H4"
                 />
               </svg>
-              取引を追加
+              収入を追加
             </Link>
             <Link
               href={`/groups/${params.groupId}`}
@@ -201,18 +152,10 @@ export default function GroupTransactionsPage() {
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-6 border-b border-slate-200">
             <div className="flex justify-between items-center">
-              <div className="space-y-4">
-                <div>
-                  <div className="text-sm text-slate-700">収入合計</div>
-                  <div className="text-2xl font-bold text-emerald-700">
-                    +¥{totalIncome.toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-sm text-slate-700">支出合計</div>
-                  <div className="text-2xl font-bold text-red-700">
-                    -¥{totalExpense.toLocaleString()}
-                  </div>
+              <div>
+                <div className="text-sm text-slate-700">今月の収入合計</div>
+                <div className="text-2xl font-bold text-emerald-700">
+                  +¥{totalIncome.toLocaleString()}
                 </div>
               </div>
               <input
@@ -232,9 +175,6 @@ export default function GroupTransactionsPage() {
                     日付
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                    種類
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
                     カテゴリー
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
@@ -249,24 +189,20 @@ export default function GroupTransactionsPage() {
                 {transactions.map((transaction) => (
                   <tr
                     key={transaction.id}
-                    onClick={() => handleTransactionClick(transaction)}
                     className="hover:bg-slate-50 cursor-pointer"
+                    onClick={() => {
+                      setSelectedTransaction(transaction);
+                      setIsEditModalOpen(true);
+                    }}
                   >
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                       {new Date(transaction.date).toLocaleDateString('ja-JP')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                      {transaction.type === 'income' ? '収入' : '支出'}
+                      {transaction.categories?.name || '未分類'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <span className={`${transaction.categories?.name === '給与' ? 'font-bold' : ''}`}>
-                        {transaction.categories?.name || '未分類'}
-                      </span>
-                    </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                      }`}>
-                      {transaction.type === 'income' ? '+' : '-'}
-                      ¥{transaction.amount.toLocaleString()}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-emerald-700">
+                      +¥{transaction.amount.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                       {transaction.description || '-'}
@@ -281,9 +217,14 @@ export default function GroupTransactionsPage() {
         {selectedTransaction && (
           <TransactionEditModal
             isOpen={isEditModalOpen}
-            onClose={() => setIsEditModalOpen(false)}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setSelectedTransaction(null);
+            }}
             transaction={selectedTransaction}
-            onUpdate={handleTransactionUpdate}
+            onUpdate={() => {
+              fetchTransactions();
+            }}
           />
         )}
       </div>

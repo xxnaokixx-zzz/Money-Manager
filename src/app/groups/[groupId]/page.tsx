@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useMemo, useCallback, Suspense, use } from 'react';
 import Link from 'next/link';
-import { Doughnut } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { supabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/AuthContext';
+import dynamic from 'next/dynamic';
+import { supabase } from '@/lib/supabase-browser';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import AuthGuard from '@/components/AuthGuard';
 
 // Chart.jsの初期化
@@ -27,14 +26,22 @@ interface Transaction {
   date: string;
   description?: string;
   user_id: string;
+  group_id: number;
+  categories?: {
+    id: string;
+    name: string;
+    type: string;
+  };
 }
 
-interface Budget {
+interface GroupBudget {
   id: number;
-  amount: number;
-  category_id: number;
-  category?: string;
   group_id: number;
+  category: string | null;
+  amount: number;
+  created_at: string;
+  updated_at: string;
+  month: string | null;
 }
 
 interface Group {
@@ -55,135 +62,100 @@ interface Salary {
   amount: number;
   payday: number;
   user_id: string;
+  group_id: number;
 }
 
-interface SupabaseMemberResponse {
-  user_id: string;
-  users: Array<{
-    id: string;
-    name: string;
-  }>;
-  salaries: Array<{
-    id: number;
-    amount: number;
-    payday: number;
-  }>;
+interface ChartData {
+  labels: string[];
+  datasets: {
+    data: number[];
+    backgroundColor: string[];
+    borderWidth: number;
+  }[];
 }
 
-// キャッシュのインターフェース
-interface GroupCache {
-  group: Group | null;
-  transactions: Transaction[];
-  budgets: Budget[];
-  memberSalaries: Array<{
-    salary: {
-      id: number;
-      amount: number;
-      payday: number;
-    };
-    user: {
-      id: string;
-      name: string;
-    };
-  }>;
-  timestamp: number;
-}
-
-// キャッシュの有効期限（5分）
-const CACHE_EXPIRY = 5 * 60 * 1000;
-
-export default function GroupHomePage(props: { params: Promise<{ groupId: string }> }) {
-  const params = use(props.params);
+export default function GroupHomePage(props: { params: { groupId: string } }) {
+  const { groupId } = props.params;
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [budgets, setBudgets] = useState<GroupBudget[]>([]);
   const [group, setGroup] = useState<Group | null>(null);
-  const [memberSalaries, setMemberSalaries] = useState<Array<{
-    salary: {
-      id: number;
-      amount: number;
-      payday: number;
-    };
-    user: {
-      id: string;
-      name: string;
-    };
-  }>>([]);
+  const [salaries, setSalaries] = useState<Salary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
+  const [displayDate, setDisplayDate] = useState(new Date());
   const router = useRouter();
   const { user } = useAuth();
 
-  // 型を明示的に定義
-  interface CategoryExpenses {
-    [key: string]: number;
-  }
+  const handleNavigation = (href: string) => {
+    router.push(href);
+  };
 
-  interface TransactionSummary {
-    totalIncome: number;
-    totalExpense: number;
-    categoryExpenses: CategoryExpenses;
-  }
-
-  interface ChartData {
-    labels: string[];
-    datasets: {
-      data: number[];
-      backgroundColor: string[];
-      borderWidth: number;
-    }[];
-  }
-
-  const { totalIncome, totalExpense, categoryExpenses } = useMemo<TransactionSummary>(() => {
-    const income = transactions
-      .filter(t => t.type === 'income')
+  // 収支の計算
+  const { totalIncome, totalExpense, categoryExpenses, salaryIncome, otherIncome } = useMemo(() => {
+    const salaryIncome = transactions
+      .filter(t => t.type === 'income' && t.categories?.name === '給与')
       .reduce((sum, t) => sum + t.amount, 0);
+
+    const otherIncome = transactions
+      .filter(t => t.type === 'income' && t.categories?.name !== '給与')
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const totalIncome = salaryIncome + otherIncome;
+
     const expense = transactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
 
-    // カテゴリーごとの支出を計算
-    const categoryExpenses: CategoryExpenses = transactions
+    const categoryExpenses = transactions
       .filter(t => t.type === 'expense')
       .reduce((acc, t) => {
-        const category = t.category || '未分類';
+        const category = t.categories?.name || '未分類';
         acc[category] = (acc[category] || 0) + t.amount;
         return acc;
-      }, {} as CategoryExpenses);
+      }, {} as { [key: string]: number });
 
     return {
-      totalIncome: income,
+      totalIncome,
       totalExpense: expense,
-      categoryExpenses
+      categoryExpenses,
+      salaryIncome,
+      otherIncome
     };
   }, [transactions]);
 
-  // チャート用のデータを準備
-  const chartData: ChartData = useMemo(() => {
-    const initialBudget = budgets.length > 0 ? budgets[0].amount : 0;
-    const currentTotal = initialBudget + totalIncome - totalExpense; // 現在の合計額
-
-    // 予算額(initialBudget)を下回っている分を計算
-    const amountBelowBudget = Math.max(0, initialBudget - currentTotal);
-    const amountWithinBudget = totalExpense - amountBelowBudget;
+  // 予算と収支の計算
+  const budgetCalculations = useMemo(() => {
+    const baseBudget = budgets.length > 0 ? budgets[0].amount : 0;
+    const adjustedBudget = baseBudget + otherIncome;
+    const usedAmount = totalExpense;
+    const remainingAmount = Math.max(0, adjustedBudget - usedAmount);
 
     return {
-      labels: ['予算割れ分', '使用済み', '残り'],
+      baseBudget,
+      adjustedBudget,
+      usedAmount,
+      remainingAmount
+    };
+  }, [budgets, otherIncome, totalExpense]);
+
+  // チャートデータの作成
+  const chartData: ChartData = useMemo(() => {
+    return {
+      labels: ['使用済み', '残り'],
       datasets: [{
         data: [
-          currentTotal < initialBudget ? amountBelowBudget : 0,
-          amountWithinBudget,
-          Math.max(0, currentTotal)
+          budgetCalculations.usedAmount,
+          budgetCalculations.remainingAmount
         ],
         backgroundColor: [
-          '#EF4444',  // 予算額を下回った分は赤
-          '#10B981',  // 予算内は緑
-          '#10B981'   // 残りは緑
+          '#EF4444',  // 支出は赤
+          '#10B981',  // 残りは緑
         ],
         borderWidth: 0,
       }]
     };
-  }, [totalExpense, budgets, totalIncome]);
+  }, [budgetCalculations]);
 
   // チャートのオプション設定
   const chartOptions = useMemo(() => ({
@@ -196,229 +168,312 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
         enabled: false,
       },
     },
-    rotation: 0, // 開始位置を12時の位置に修正
+    rotation: 0,
   }), []);
-
-  // キャッシュの取得
-  const getCache = useCallback((): GroupCache | null => {
-    const cached = localStorage.getItem(`group_${params.groupId}_${selectedMonth}`);
-    if (!cached) return null;
-
-    const parsedCache = JSON.parse(cached);
-    if (Date.now() - parsedCache.timestamp > CACHE_EXPIRY) {
-      localStorage.removeItem(`group_${params.groupId}_${selectedMonth}`);
-      return null;
-    }
-
-    return parsedCache;
-  }, [params.groupId, selectedMonth]);
-
-  // キャッシュの保存
-  const setCache = useCallback((data: Omit<GroupCache, 'timestamp'>) => {
-    const cacheData = {
-      ...data,
-      timestamp: Date.now()
-    };
-    localStorage.setItem(`group_${params.groupId}_${selectedMonth}`, JSON.stringify(cacheData));
-  }, [params.groupId, selectedMonth]);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // キャッシュをチェック
-      const cached = getCache();
-      if (cached) {
-        setGroup(cached.group);
-        setTransactions(cached.transactions);
-        setBudgets(cached.budgets);
-        setMemberSalaries(cached.memberSalaries);
-        setLoading(false);
-        return;
-      }
-
-      // グループ情報の取得
+      // グループの基本情報を取得
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
         .select('*')
-        .eq('id', params.groupId)
+        .eq('id', groupId)
         .single();
 
-      if (groupError) {
-        console.error('Group fetch error:', groupError);
-        throw new Error(`グループ情報の取得に失敗しました: ${groupError.message}`);
-      }
+      if (groupError) throw groupError;
+      if (!groupData) throw new Error('グループが見つかりません');
 
-      // 取引データの取得
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('group_id', params.groupId)
-        .gte('date', `${selectedMonth}-01`)
-        .lte('date', new Date(new Date(`${selectedMonth}-01`).getFullYear(), new Date(`${selectedMonth}-01`).getMonth() + 1, 0).toISOString().split('T')[0])
-        .order('date', { ascending: false });
-
-      if (transactionsError) {
-        console.error('Transactions fetch error:', transactionsError);
-        throw new Error(`取引データの取得に失敗しました: ${transactionsError.message}`);
-      }
-
-      // 予算データの取得
-      const { data: budgetsData, error: budgetsError } = await supabase
-        .from('group_budgets')
-        .select('*')
-        .eq('group_id', params.groupId)
-        .eq('month', `${selectedMonth}-01`);
-
-      if (budgetsError) {
-        console.error('Budgets fetch error:', budgetsError);
-        throw new Error(`予算データの取得に失敗しました: ${budgetsError.message}`);
-      }
-
-      // メンバー情報の取得（一括で取得）
-      const { data: membersWithUsers, error: membersError } = await supabase
+      // グループメンバー情報を取得
+      const { data: membersData, error: membersError } = await supabase
         .from('group_members')
         .select(`
           user_id,
-          users!inner (
+          role,
+          salary_id,
+          users (
             id,
             name
           ),
-          salaries!inner (
+          salaries!left (
             id,
             amount,
             payday
           )
         `)
-        .eq('group_id', params.groupId);
+        .eq('group_id', groupId)
+        .eq('salaries.group_id', groupId);
 
-      if (membersError) {
-        console.error('Members fetch error:', membersError);
-        throw new Error(`メンバー情報の取得に失敗しました: ${membersError.message}`);
-      }
+      if (membersError) throw membersError;
 
-      // データを整形
-      const formattedSalaries = ((membersWithUsers || []) as SupabaseMemberResponse[]).map(member => {
-        if (!member.users?.[0] || !member.salaries?.[0]) return null;
-        return {
-          salary: {
-            id: member.salaries[0].id,
-            amount: member.salaries[0].amount,
-            payday: member.salaries[0].payday
-          },
-          user: {
-            id: member.users[0].id,
-            name: member.users[0].name
-          }
-        };
-      }).filter((item): item is NonNullable<typeof item> => item !== null);
+      const formattedMembers = membersData.map((m: any) => ({
+        user_id: m.user_id,
+        name: m.users.name,
+        role: m.role,
+        salary_id: m.salary_id
+      }));
 
-      // 状態を更新
-      setGroup(groupData);
+      const salariesData: Salary[] = membersData
+        .filter((m: any) => m.salary_id && m.salaries)
+        .map((m: any) => ({
+          id: m.salaries.id,
+          amount: m.salaries.amount,
+          payday: m.salaries.payday,
+          user_id: m.user_id,
+          group_id: parseInt(groupId)
+        }));
+
+      const formattedGroup: Group = {
+        id: groupData.id,
+        name: groupData.name,
+        description: groupData.description,
+        created_at: groupData.created_at,
+        created_by: groupData.created_by,
+        members: formattedMembers
+      };
+
+      setGroup(formattedGroup);
+
+      // 取引データの取得
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const startDate = new Date(year, month - 1, 1).toISOString();
+      const endDate = new Date(year, month, 0).toISOString();
+
+      const { data: transactionsData, error: transactionsError } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          categories (
+            id,
+            name,
+            type
+          )
+        `)
+        .eq('group_id', groupId)
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+      if (transactionsError) throw transactionsError;
       setTransactions(transactionsData || []);
+
+      // グループ予算データの取得
+      const { data: budgetsData, error: budgetsError } = await supabase
+        .from('group_budgets')
+        .select('*')
+        .eq('group_id', groupId)
+        .eq('month', `${selectedMonth}-01`);
+
+      if (budgetsError) throw budgetsError;
       setBudgets(budgetsData || []);
-      setMemberSalaries(formattedSalaries);
+      setSalaries(salariesData);
 
-      // キャッシュを保存
-      setCache({
-        group: groupData,
-        transactions: transactionsData || [],
-        budgets: budgetsData || [],
-        memberSalaries: formattedSalaries
-      });
-
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setError(error instanceof Error ? error.message : 'データの取得に失敗しました');
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError(err instanceof Error ? err.message : 'データの取得に失敗しました');
     } finally {
       setLoading(false);
     }
-  }, [params.groupId, selectedMonth, getCache, setCache]);
+  }, [groupId, selectedMonth]);
 
   useEffect(() => {
-    if (!user) return;
     fetchData();
-  }, [fetchData, selectedMonth, user]);
-
-  const handleNavigation = useCallback((path: string) => {
-    setLoading(true);
-    router.push(path);
-  }, [router]);
+  }, [fetchData]);
 
   if (loading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-        </div>
-      </div>
+      <AuthGuard>
+        <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+          <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+          </div>
+        </main>
+      </AuthGuard>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="bg-red-100 text-red-700 p-4 rounded-lg mb-6 border border-red-200">
-          {error}
-        </div>
-      </div>
+      <AuthGuard>
+        <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+          <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="bg-red-50 text-red-500 p-4 rounded-md">
+              {error}
+            </div>
+          </div>
+        </main>
+      </AuthGuard>
     );
   }
 
   if (!group) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="bg-yellow-100 text-yellow-700 p-4 rounded-lg mb-6 border border-yellow-200">
-          グループが見つかりません
-        </div>
-      </div>
+      <AuthGuard>
+        <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+          <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="text-center">
+              <p className="text-gray-500">グループが見つかりません</p>
+            </div>
+          </div>
+        </main>
+      </AuthGuard>
     );
   }
 
   return (
     <AuthGuard>
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* ヘッダー */}
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-800">{group.name}</h1>
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => router.push('/groups')}
-              className="inline-flex items-center px-4 py-2 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
-            >
-              <svg
-                className="w-4 h-4 mr-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+      <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          {/* ヘッダー部分 */}
+          <div className="flex justify-between items-center mb-8">
+            <div className="flex items-center gap-4">
+              <Link
+                href="/groups"
+                className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                />
-              </svg>
-              グループ一覧に戻る
-            </button>
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                グループ一覧に戻る
+              </Link>
+              <h1 className="text-2xl font-bold text-gray-800">{group.name}</h1>
+            </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+          {/* メインコンテンツ */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {/* 予算と収支の表示 */}
+            <div
+              className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 cursor-pointer hover:bg-gray-50"
+              onClick={() => handleNavigation(`/groups/${groupId}/budget`)}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-800">予算状況</h2>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/groups/${groupId}/budget`}
+                    className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                      />
+                    </svg>
+                    編集
+                  </Link>
+                  <Link
+                    href={`/groups/${groupId}/transactions`}
+                    className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                    履歴
+                  </Link>
+                </div>
+              </div>
+              {budgets.length === 0 ? (
+                <div className="text-center py-4 text-gray-500">
+                  予算が設定されていません
+                </div>
+              ) : (
+                <div className="flex flex-col items-center">
+                  <div className="relative w-48 h-48 mb-4">
+                    <Suspense fallback={<div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>}>
+                      <DoughnutChart data={chartData} options={chartOptions} />
+                    </Suspense>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-base font-semibold text-gray-800 mb-1">
+                          残り
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900">
+                          ¥{budgetCalculations.remainingAmount.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 収支サマリー */}
+            <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+              <h2 className="text-lg font-semibold mb-4 text-slate-900">今月の収支</h2>
+              <div className="space-y-4">
+                <div
+                  className="cursor-pointer hover:bg-gray-50 p-2 rounded-lg"
+                  onClick={() => handleNavigation(`/groups/${groupId}/transactions`)}
+                >
+                  <div className="text-base font-semibold text-gray-900">予算（給与を含む）</div>
+                  <div className="text-2xl font-bold text-slate-900">
+                    {budgets.length > 0 ? (
+                      `¥${(budgets[0].amount + otherIncome).toLocaleString()}`
+                    ) : (
+                      <span className="text-gray-500">設定されていません</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-4">
+                  <div
+                    className="cursor-pointer hover:bg-gray-50 p-2 rounded-lg"
+                    onClick={() => handleNavigation(`/groups/${groupId}/income`)}
+                  >
+                    <div className="text-base font-semibold text-gray-900">収入（給与以外）</div>
+                    <div className="text-2xl font-bold text-emerald-700">
+                      +¥{otherIncome.toLocaleString()}
+                    </div>
+                  </div>
+                  <div
+                    className="cursor-pointer hover:bg-gray-50 p-2 rounded-lg"
+                    onClick={() => handleNavigation(`/groups/${groupId}/expense`)}
+                  >
+                    <div className="text-base font-semibold text-gray-900">支出</div>
+                    <div className="text-2xl font-bold text-red-700">
+                      -¥{totalExpense.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 給与情報カード */}
+          <div className="mt-8 mb-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">
-                予算状況
-              </h2>
-              <div className="flex space-x-2">
+              <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center">
+                  <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+                  <span className="text-sm text-slate-600">給料日設定</span>
+                </div>
                 <Link
-                  href={`/groups/${params.groupId}/budget`}
+                  href={`/groups/${groupId}/salary`}
                   className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleNavigation(`/groups/${params.groupId}/budget`);
-                  }}
                 >
                   <svg
                     className="w-4 h-4 mr-1"
@@ -433,234 +488,181 @@ export default function GroupHomePage(props: { params: Promise<{ groupId: string
                       d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                     />
                   </svg>
-                  編集
-                </Link>
-                <Link
-                  href={`/groups/${params.groupId}/transactions`}
-                  className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleNavigation(`/groups/${params.groupId}/transactions`);
-                  }}
-                >
-                  <svg
-                    className="w-4 h-4 mr-1"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                  履歴
+                  設定
                 </Link>
               </div>
             </div>
-            {budgets.length === 0 ? (
-              <div className="text-center py-4 text-gray-500">
-                予算が設定されていません
+            {salaries.length > 0 ? (
+              <div className="flex justify-between items-center gap-8">
+                <div className="flex-1 space-y-6">
+                  <div>
+                    <div className="text-base text-gray-500">次の給料日</div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {(() => {
+                        const today = new Date();
+                        const year = today.getFullYear();
+                        const month = today.getMonth();
+                        const payday = salaries[0].payday;
+                        let nextPayday = new Date(year, month, payday);
+                        if (today > nextPayday) {
+                          nextPayday = new Date(year, month + 1, payday);
+                        }
+                        const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return (
+                          <>
+                            {nextPayday.getMonth() + 1}月{payday}日
+                            <span className="ml-2 text-base font-normal text-slate-600">
+                              （あと{diffDays}日）
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-base text-gray-500">給料総額</div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      ¥{salaries.reduce((sum, s) => sum + s.amount, 0).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <div className="bg-slate-50 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <button
+                        onClick={() => {
+                          const newDate = new Date(displayDate);
+                          newDate.setMonth(newDate.getMonth() - 1);
+                          setDisplayDate(newDate);
+                        }}
+                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <div className="font-medium text-slate-700">
+                        {displayDate.getFullYear()}年{displayDate.getMonth() + 1}月
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newDate = new Date(displayDate);
+                          newDate.setMonth(newDate.getMonth() + 1);
+                          setDisplayDate(newDate);
+                        }}
+                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                      {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
+                        <div key={day} className="text-slate-500 font-medium">
+                          {day}
+                        </div>
+                      ))}
+                      {(() => {
+                        const firstDay = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
+                        const lastDay = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
+                        const days = [];
+                        const today = new Date();
+
+                        // 月初めの空白を追加
+                        for (let i = 0; i < firstDay.getDay(); i++) {
+                          days.push(<div key={`empty-${i}`} />);
+                        }
+
+                        // 日付を追加
+                        for (let i = 1; i <= lastDay.getDate(); i++) {
+                          const isPayday = salaries.some(s => s.payday === i);
+                          const isToday = i === today.getDate() &&
+                            today.getMonth() === displayDate.getMonth() &&
+                            today.getFullYear() === displayDate.getFullYear();
+
+                          days.push(
+                            <div
+                              key={i}
+                              className="relative"
+                            >
+                              <div
+                                className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
+                                  ${isPayday ? 'bg-blue-500 text-white font-bold' : ''}
+                                  ${isToday && !isPayday ? 'border-2 border-slate-300' : ''}
+                                  ${!isPayday && !isToday ? 'text-slate-700' : ''}
+                                `}
+                              >
+                                {i}
+                              </div>
+                              {isPayday && (
+                                <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return days;
+                      })()}
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center">
-                <div className="relative w-48 h-48 mb-4">
-                  <Suspense fallback={<div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>}>
-                    <DoughnutChart data={chartData} options={chartOptions} />
-                  </Suspense>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-gray-800">
-                        ¥{Math.max(0, (budgets[0].amount + totalIncome - totalExpense)).toLocaleString()}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        残り
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2 w-full">
-                  <div className="flex justify-between text-sm">
-                    <span className="font-medium">予算額</span>
-                    <span className="text-gray-600">
-                      ¥{budgets[0].amount.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="font-medium">収入</span>
-                    <span className="text-emerald-600">
-                      +¥{totalIncome.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="font-medium">支出</span>
-                    <span className="text-red-500">
-                      -¥{totalExpense.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="border-t border-slate-200 pt-2 mt-2">
-                    <div className="flex justify-between text-sm font-medium">
-                      <span>利用可能額</span>
-                      <span className="text-blue-600">
-                        ¥{(budgets[0].amount + totalIncome - totalExpense).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+              <div className="text-center py-4">
+                <p className="text-gray-500 mb-4">給与情報が設定されていません</p>
+                <Link
+                  href={`/groups/${groupId}/salary`}
+                  className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+                >
+                  給与情報を設定する
+                </Link>
               </div>
             )}
           </div>
 
+          {/* メンバー一覧 */}
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-            <h2 className="text-lg font-semibold mb-4 text-slate-900">今月の収支</h2>
-            <div className="space-y-4">
-              <div>
-                <div className="text-sm text-slate-700">収入</div>
-                <div className="text-2xl font-bold text-emerald-700">
-                  ¥{totalIncome.toLocaleString()}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-700">支出</div>
-                <div className="text-2xl font-bold text-red-700">
-                  ¥{totalExpense.toLocaleString()}
-                </div>
-              </div>
-              <div className="border-t border-slate-200 pt-4">
-                <div className="text-sm text-slate-700">収支</div>
-                <div className="text-2xl font-bold text-slate-900">
-                  ¥{(totalIncome - totalExpense).toLocaleString()}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-slate-900">最近の取引</h2>
-            <div className="flex space-x-2">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-gray-800">メンバー一覧</h2>
               <Link
-                href={`/groups/${params.groupId}/transactions/new`}
-                className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                href={`/groups/${group.id}/members/new`}
+                className="inline-flex items-center px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
               >
-                <svg
-                  className="w-4 h-4 mr-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
+                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-                追加
-              </Link>
-              <Link
-                href={`/groups/${params.groupId}/transactions`}
-                className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-              >
-                <svg
-                  className="w-4 h-4 mr-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-                すべて表示
+                メンバーを追加
               </Link>
             </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                    日付
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                    カテゴリー
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 uppercase tracking-wider">
-                    金額
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-200">
-                {transactions.slice(0, 5).map((transaction) => (
-                  <tr key={transaction.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                      {new Date(transaction.date).toLocaleDateString('ja-JP')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                      {transaction.category}
-                    </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                      }`}>
-                      {transaction.type === 'income' ? '+' : '-'}
-                      ¥{transaction.amount.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {memberSalaries.length > 0 && (
-          <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">メンバーの給料情報</h2>
-            <div className="space-y-6">
-              {memberSalaries.map(({ salary, user }) => (
-                <div key={user.id} className="border-b border-slate-200 pb-4 last:border-b-0 last:pb-0">
-                  <h3 className="text-md font-medium text-gray-800 mb-3">
-                    {user.name}
-                    <span className="text-sm text-gray-500 ml-2">さんの給料情報</span>
-                  </h3>
-                  <div className="space-y-3">
+            <div className="space-y-3">
+              {group.members.map((member) => {
+                const memberSalary = salaries.find(s => s.user_id === member.user_id);
+                return (
+                  <div key={member.user_id} className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
                     <div>
-                      <div className="text-sm text-gray-500">次の給料日</div>
-                      <div className="text-lg font-medium text-gray-900">
-                        {(() => {
-                          const today = new Date();
-                          const year = today.getFullYear();
-                          const month = today.getMonth();
-                          const payday = salary.payday;
-                          let nextPayday = new Date(year, month, payday);
-                          if (today > nextPayday) {
-                            // 今月の給料日を過ぎていれば来月
-                            nextPayday = new Date(year, month + 1, payday);
-                          }
-                          const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          return `${nextPayday.getMonth() + 1}月${payday}日（あと${diffDays}日）`;
-                        })()}
-                      </div>
+                      <p className="font-medium text-gray-800">{member.name}</p>
+                      <p className="text-sm text-gray-500">{member.role}</p>
                     </div>
-                    <div>
-                      <div className="text-sm text-gray-500">給料額</div>
-                      <div className="text-lg font-medium text-gray-900">
-                        ¥{salary.amount.toLocaleString()}
+                    {memberSalary && (
+                      <div className="text-right">
+                        <p className="text-sm text-gray-500">給与</p>
+                        <p className="font-semibold text-blue-500">
+                          ¥{memberSalary.amount.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {memberSalary.payday}日支払い
+                        </p>
                       </div>
-                    </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      </main>
     </AuthGuard>
   );
 } 
