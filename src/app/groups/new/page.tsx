@@ -20,25 +20,51 @@ export default function NewGroupPage() {
     try {
       console.log('Starting group creation...');
 
-      console.log('Sending request to create group...');
-      const response = await fetch("/api/groups", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          name,
-          description,
-        }),
-      });
+      // セッションを確認
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw new Error('認証エラーが発生しました');
+      }
 
-      console.log('Response status:', response.status);
-      const data = await response.json();
-      console.log('Response data:', data);
+      // グループを作成
+      const { data: group, error: groupError } = await supabase
+        .from('groups')
+        .insert([
+          {
+            name,
+            description,
+            created_by: session.user.id,
+          }
+        ])
+        .select()
+        .single();
 
-      if (!response.ok) {
-        throw new Error(data.error || "グループの作成に失敗しました");
+      if (groupError) {
+        throw new Error(groupError.message);
+      }
+
+      if (!group) {
+        throw new Error('グループの作成に失敗しました');
+      }
+
+      // メンバーを追加
+      const { error: memberError } = await supabase
+        .from('group_members')
+        .insert([
+          {
+            group_id: Number(group.id),
+            user_id: session.user.id,
+            role: 'owner',
+          }
+        ]);
+
+      if (memberError) {
+        // グループ作成をロールバック
+        await supabase
+          .from('groups')
+          .delete()
+          .eq('id', group.id);
+        throw new Error(memberError.message);
       }
 
       router.push("/groups");

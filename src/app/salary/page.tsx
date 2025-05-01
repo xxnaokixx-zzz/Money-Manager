@@ -25,9 +25,17 @@ export default function SalaryPage() {
 
   const fetchSalary = async () => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      // 給与情報を取得
       const { data, error } = await supabase
         .from('salaries')
         .select('*')
+        .eq('user_id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') {
@@ -50,6 +58,12 @@ export default function SalaryPage() {
     e.preventDefault();
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
       if (salary) {
         // 既存の給料情報を更新
         const { error } = await supabase
@@ -64,40 +78,13 @@ export default function SalaryPage() {
         if (error) throw error;
       } else {
         // 新規給料情報を作成
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          router.push('/login');
-          return;
-        }
-        const { data: groups, error: groupError } = await supabase
-          .from('groups')
-          .select(`
-            id,
-            name,
-            description,
-            created_at,
-            created_by,
-            members:group_members(
-              user_id,
-              role
-            )
-          `)
-          .eq('created_by', user.id);
-
-        if (groupError) throw groupError;
-
-        if (!groups || groups.length === 0) {
-          throw new Error('所属するグループが見つかりません');
-        }
-
         const { error } = await supabase
           .from('salaries')
           .insert([{
             amount: parseInt(amount),
             payday: parseInt(payday),
             last_paid: new Date().toISOString().split('T')[0],
-            user_id: user.id,
-            group_id: groups[0].id  // 最初のグループのIDを設定
+            user_id: user.id
           }]);
 
         if (error) throw error;

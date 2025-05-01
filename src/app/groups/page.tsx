@@ -49,6 +49,7 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingGroupId, setDeletingGroupId] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchGroups = async () => {
@@ -104,6 +105,49 @@ export default function GroupsPage() {
     fetchGroups();
   }, [router]);
 
+  const handleDeleteGroup = async (groupId: number) => {
+    if (!window.confirm('本当にこのグループを削除しますか？')) {
+      return;
+    }
+
+    setDeletingGroupId(groupId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('認証エラーが発生しました');
+      }
+
+      // まずメンバーを削除
+      const { error: memberError } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId);
+
+      if (memberError) {
+        throw memberError;
+      }
+
+      // 次にグループを削除
+      const { error: groupError } = await supabase
+        .from('groups')
+        .delete()
+        .eq('id', groupId)
+        .eq('created_by', session.user.id);
+
+      if (groupError) {
+        throw groupError;
+      }
+
+      // 成功したら、グループリストから削除
+      setGroups(groups.filter(g => g.id !== groupId));
+    } catch (error) {
+      console.error('Error deleting group:', error);
+      setError('グループの削除に失敗しました');
+    } finally {
+      setDeletingGroupId(null);
+    }
+  };
+
   return (
     <AuthGuard>
       <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
@@ -155,12 +199,36 @@ export default function GroupsPage() {
                         <p className="text-gray-600 mt-1">{group.description}</p>
                       )}
                     </div>
-                    <Link
-                      href={`/groups/${group.id}`}
-                      className="inline-flex items-center px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                    >
-                      詳細を見る
-                    </Link>
+                    <div className="flex gap-2">
+                      <Link
+                        href={`/groups/${group.id}`}
+                        className="inline-flex items-center px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                      >
+                        詳細を見る
+                      </Link>
+                      <button
+                        onClick={() => handleDeleteGroup(group.id)}
+                        disabled={deletingGroupId === group.id}
+                        className="inline-flex items-center px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {deletingGroupId === group.id ? (
+                          <>
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            削除中...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            削除
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-500">
                     <p>作成日: {new Date(group.created_at).toLocaleDateString()}</p>

@@ -298,6 +298,14 @@ export default function Home() {
           .single()
       ]);
 
+      // 給与データの詳細をログ出力
+      console.log('Salary query result:', {
+        data: salaryData.data,
+        error: salaryData.error,
+        status: salaryData.status,
+        statusText: salaryData.statusText
+      });
+
       // 各データの取得結果を詳細にログ出力
       console.log('Transactions query result:', {
         data: transactionsData.data,
@@ -699,15 +707,37 @@ export default function Home() {
         </div>
       </div>
 
-      {salary && (
-        <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
+      {/* 給与情報カード */}
+      <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
+          <div className="flex items-center space-x-2">
             <div className="flex items-center">
               <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
               <span className="text-sm text-slate-600">給料日設定</span>
             </div>
+            <Link
+              href="/salary"
+              className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+            >
+              <svg
+                className="w-4 h-4 mr-1"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+              設定
+            </Link>
           </div>
+        </div>
+        {salary ? (
           <div className="flex justify-between items-center gap-8">
             <div className="flex-1 space-y-6">
               <div>
@@ -824,8 +854,18 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="text-center py-4">
+            <p className="text-gray-500 mb-4">給与情報が設定されていません</p>
+            <Link
+              href="/salary"
+              className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              給与情報を設定する
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

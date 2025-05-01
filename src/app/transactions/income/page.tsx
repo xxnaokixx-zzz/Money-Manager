@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase-browser';
 import Link from 'next/link';
+import TransactionEditModal from '@/components/TransactionEditModal';
 
 interface Transaction {
   id: number;
@@ -28,6 +29,50 @@ export default function IncomeTransactions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  const fetchTransactions = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      // 月の最初の日と最後の日を計算
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const firstDay = `${selectedMonth}-01`;
+      const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          categories (
+            id,
+            name,
+            type
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('type', 'income')
+        .gte('date', firstDay)
+        .lte('date', lastDayStr)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTransactions(data || []);
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+      setError('データの取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  }, [router, selectedMonth]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -36,50 +81,8 @@ export default function IncomeTransactions() {
   }, [user, authLoading, router]);
 
   useEffect(() => {
-    const fetchTransactions = async () => {
-      try {
-        setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          router.push('/login');
-          return;
-        }
-
-        // 月の最初の日と最後の日を計算
-        const [year, month] = selectedMonth.split('-').map(Number);
-        const lastDay = new Date(year, month, 0).getDate();
-        const firstDay = `${selectedMonth}-01`;
-        const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-        const { data, error } = await supabase
-          .from('transactions')
-          .select(`
-            *,
-            categories (
-              id,
-              name,
-              type
-            )
-          `)
-          .eq('user_id', user.id)
-          .eq('type', 'income')
-          .gte('date', firstDay)
-          .lte('date', lastDayStr)
-          .order('date', { ascending: false })
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setTransactions(data || []);
-      } catch (error) {
-        console.error('Error fetching transactions:', error);
-        setError('データの取得に失敗しました');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchTransactions();
-  }, [router, selectedMonth]);
+  }, [fetchTransactions]);
 
   const totalIncome = transactions.reduce((sum, t) => sum + t.amount, 0);
 
@@ -187,7 +190,14 @@ export default function IncomeTransactions() {
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
               {transactions.map((transaction) => (
-                <tr key={transaction.id} className="hover:bg-slate-50">
+                <tr
+                  key={transaction.id}
+                  className="hover:bg-slate-50 cursor-pointer"
+                  onClick={() => {
+                    setSelectedTransaction(transaction);
+                    setIsEditModalOpen(true);
+                  }}
+                >
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                     {new Date(transaction.date).toLocaleDateString('ja-JP')}
                   </td>
@@ -206,6 +216,20 @@ export default function IncomeTransactions() {
           </table>
         </div>
       </div>
+
+      {selectedTransaction && (
+        <TransactionEditModal
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setSelectedTransaction(null);
+          }}
+          transaction={selectedTransaction}
+          onUpdate={() => {
+            fetchTransactions();
+          }}
+        />
+      )}
     </div>
   );
 } 

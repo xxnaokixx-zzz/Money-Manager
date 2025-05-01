@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase-browser';
 import Link from 'next/link';
+import TransactionEditModal from '@/components/TransactionEditModal';
 
 interface Transaction {
   id: number;
@@ -28,6 +29,9 @@ export default function AllTransactions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [nextSalaryInfo, setNextSalaryInfo] = useState<{ date: string; amount: number } | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -80,6 +84,81 @@ export default function AllTransactions() {
     fetchTransactions();
   }, [router, selectedMonth]);
 
+  useEffect(() => {
+    const fetchNextSalaryInfo = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const today = new Date();
+        const currentMonth = today.getMonth();
+        const currentYear = today.getFullYear();
+
+        // 今月の給料日を取得
+        const { data: currentMonthSalary, error: currentError } = await supabase
+          .from('transactions')
+          .select(`
+            *,
+            categories (
+              id,
+              name,
+              type
+            )
+          `)
+          .eq('user_id', user.id)
+          .eq('type', 'income')
+          .eq('categories.name', '給与')
+          .gte('date', `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`)
+          .lte('date', `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-31`)
+          .order('date', { ascending: true })
+          .limit(1);
+
+        if (currentError) throw currentError;
+
+        // 今月の給料が見つからない場合は来月の給料を取得
+        if (!currentMonthSalary || currentMonthSalary.length === 0) {
+          const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+          const nextYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+
+          const { data: nextMonthSalary, error: nextError } = await supabase
+            .from('transactions')
+            .select(`
+              *,
+              categories (
+                id,
+                name,
+                type
+              )
+            `)
+            .eq('user_id', user.id)
+            .eq('type', 'income')
+            .eq('categories.name', '給与')
+            .gte('date', `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-01`)
+            .lte('date', `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-31`)
+            .order('date', { ascending: true })
+            .limit(1);
+
+          if (nextError) throw nextError;
+          if (nextMonthSalary && nextMonthSalary.length > 0) {
+            setNextSalaryInfo({
+              date: nextMonthSalary[0].date,
+              amount: nextMonthSalary[0].amount
+            });
+          }
+        } else {
+          setNextSalaryInfo({
+            date: currentMonthSalary[0].date,
+            amount: currentMonthSalary[0].amount
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching salary info:', error);
+      }
+    };
+
+    fetchNextSalaryInfo();
+  }, [user, authLoading]);
+
   const totalIncome = transactions
     .filter(t => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -87,6 +166,56 @@ export default function AllTransactions() {
   const totalExpense = transactions
     .filter(t => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
+
+  const handleTransactionClick = (transaction: Transaction) => {
+    setSelectedTransaction(transaction);
+    setIsEditModalOpen(true);
+  };
+
+  const handleTransactionUpdate = () => {
+    // 取引一覧を再取得
+    const fetchTransactions = async () => {
+      try {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push('/login');
+          return;
+        }
+
+        const [year, month] = selectedMonth.split('-').map(Number);
+        const lastDay = new Date(year, month, 0).getDate();
+        const firstDay = `${selectedMonth}-01`;
+        const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+
+        const { data, error } = await supabase
+          .from('transactions')
+          .select(`
+            *,
+            categories (
+              id,
+              name,
+              type
+            )
+          `)
+          .eq('user_id', user.id)
+          .gte('date', firstDay)
+          .lte('date', lastDayStr)
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setTransactions(data || []);
+      } catch (error) {
+        console.error('Error fetching transactions:', error);
+        setError('データの取得に失敗しました');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTransactions();
+  };
 
   if (loading) {
     return (
@@ -203,15 +332,21 @@ export default function AllTransactions() {
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
               {transactions.map((transaction) => (
-                <tr key={transaction.id} className="hover:bg-slate-50">
+                <tr
+                  key={transaction.id}
+                  onClick={() => handleTransactionClick(transaction)}
+                  className="hover:bg-slate-50 cursor-pointer"
+                >
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                     {new Date(transaction.date).toLocaleDateString('ja-JP')}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                     {transaction.type === 'income' ? '収入' : '支出'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                    {transaction.categories?.name || '未分類'}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={`${transaction.categories?.name === '給与' ? 'font-bold' : ''}`}>
+                      {transaction.categories?.name || '未分類'}
+                    </span>
                   </td>
                   <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${transaction.type === 'income' ? 'text-emerald-700' : 'text-red-700'
                     }`}>
@@ -227,6 +362,15 @@ export default function AllTransactions() {
           </table>
         </div>
       </div>
+
+      {selectedTransaction && (
+        <TransactionEditModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          transaction={selectedTransaction}
+          onUpdate={handleTransactionUpdate}
+        />
+      )}
     </div>
   );
 } 
