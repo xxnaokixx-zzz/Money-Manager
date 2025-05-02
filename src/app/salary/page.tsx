@@ -12,6 +12,7 @@ interface Salary {
   amount: number;
   payday: number;
   user_id: string;
+  group_id: number;
 }
 
 export default function SalaryPage() {
@@ -30,11 +31,50 @@ export default function SalaryPage() {
 
       console.log('Fetching salary data for user:', user.id);
 
+      // グループIDの取得（なければ所属させる処理を追加）
+      const { data: groupMember, error: groupError } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (groupError) {
+        console.error('グループ情報取得エラー:', groupError);
+        throw new Error('グループ情報の取得に失敗しました');
+      }
+
+      let groupId = groupMember?.group_id;
+
+      // 所属していない場合 → 仮に「default group」に所属させる
+      if (!groupId) {
+        console.log('ユーザーがグループに所属していません。デフォルトグループに追加します。');
+
+        const DEFAULT_GROUP_ID = 1; // 実際のdefault group_idに変更してね
+        const { data: insertGroup, error: insertGroupError } = await supabase
+          .from('group_members')
+          .insert({
+            user_id: user.id,
+            group_id: DEFAULT_GROUP_ID,
+            role: 'member'
+          })
+          .select()
+          .single();
+
+        if (insertGroupError) {
+          console.error('グループへの所属追加に失敗:', insertGroupError);
+          throw new Error('ユーザーをグループに追加できませんでした');
+        }
+
+        groupId = DEFAULT_GROUP_ID;
+        console.log('ユーザーをグループに追加しました:', groupId);
+      }
+
       // 給与データを取得（最新のものから順に）
       const { data, error: salaryError } = await supabase
         .from('salaries')
         .select('*')
         .eq('user_id', user.id)
+        .eq('group_id', groupId)
         .order('created_at', { ascending: false });
 
       console.log('Fetch salary response:', {
@@ -60,6 +100,7 @@ export default function SalaryPage() {
         amount: latestSalary.amount,
         payday: latestSalary.payday,
         last_paid: latestSalary.last_paid,
+        group_id: latestSalary.group_id,
         created_at: latestSalary.created_at
       });
 
@@ -146,12 +187,43 @@ export default function SalaryPage() {
         throw new Error('給与日は1から31の間で入力してください');
       }
 
-      console.log('Starting salary update:', {
-        user_id: user.id,
-        amount,
-        payday,
-        currentDate: new Date().toISOString()
-      });
+      // グループIDの取得（なければ所属させる処理を追加）
+      const { data: groupMember, error: groupError } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (groupError) {
+        console.error('グループ情報取得エラー:', groupError);
+        throw new Error('グループ情報の取得に失敗しました');
+      }
+
+      let groupId = groupMember?.group_id;
+
+      // 所属していない場合 → 仮に「default group」に所属させる
+      if (!groupId) {
+        console.log('ユーザーがグループに所属していません。デフォルトグループに追加します。');
+
+        const DEFAULT_GROUP_ID = 1; // 実際のdefault group_idに変更してね
+        const { data: insertGroup, error: insertGroupError } = await supabase
+          .from('group_members')
+          .insert({
+            user_id: user.id,
+            group_id: DEFAULT_GROUP_ID,
+            role: 'member'
+          })
+          .select()
+          .single();
+
+        if (insertGroupError) {
+          console.error('グループへの所属追加に失敗:', insertGroupError);
+          throw new Error('ユーザーをグループに追加できませんでした');
+        }
+
+        groupId = DEFAULT_GROUP_ID;
+        console.log('ユーザーをグループに追加しました:', groupId);
+      }
 
       // 既存のレコードを確認
       const { data: existingData, error: checkError } = await supabase
@@ -163,11 +235,6 @@ export default function SalaryPage() {
         console.error('Error checking existing salary:', checkError);
         throw checkError;
       }
-
-      console.log('Existing salary records:', {
-        count: existingData?.length,
-        records: existingData
-      });
 
       // 既存のレコードを削除
       if (existingData && existingData.length > 0) {
@@ -193,30 +260,17 @@ export default function SalaryPage() {
         adjustedPayday
       ).toISOString().split('T')[0];
 
-      console.log('Calculated payment date:', {
-        payday,
-        monthLastDay,
-        adjustedPayday,
-        lastPaid
-      });
-
       // 新しいレコードを挿入
       const { data: insertedData, error: insertError } = await supabase
         .from('salaries')
         .insert({
           user_id: user.id,
+          group_id: groupId,
           amount,
           payday,
           last_paid: lastPaid
         })
         .select();
-
-      console.log('Insert response:', {
-        data: insertedData,
-        error: insertError,
-        code: insertError?.code,
-        message: insertError?.message
-      });
 
       if (insertError) {
         console.error('Insert Error:', insertError);
@@ -234,12 +288,6 @@ export default function SalaryPage() {
         console.error('Error verifying data:', verifyError);
         throw verifyError;
       }
-
-      console.log('Database state after update:', {
-        recordCount: verifyData?.length,
-        latestRecord: verifyData?.[0],
-        allRecords: verifyData
-      });
 
       // 最新のデータを状態に反映
       if (verifyData && verifyData.length > 0) {
