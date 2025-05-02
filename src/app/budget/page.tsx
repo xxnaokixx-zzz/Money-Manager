@@ -23,6 +23,8 @@ export default function BudgetPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedAmount, setEditedAmount] = useState('');
   const [totalIncome, setTotalIncome] = useState(0);
+  const [salaryIncome, setSalaryIncome] = useState(0);
+  const [otherIncome, setOtherIncome] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -43,15 +45,46 @@ export default function BudgetPage() {
         }
 
         // 予算を取得
+        const monthDate = new Date(`${selectedMonth}-01`);
+        const formattedDate = monthDate.toISOString().split('T')[0];
+        console.log('月の型変換:', {
+          original: selectedMonth,
+          date: monthDate,
+          formatted: formattedDate,
+          type: typeof formattedDate
+        });
+
         const { data: budgetData, error: budgetError } = await supabase
           .from('budgets')
           .select('*')
           .eq('user_id', user.id)
-          .eq('month', `${selectedMonth}-01`)
+          .eq('month', formattedDate)
           .single();
 
-        if (budgetError && budgetError.code !== 'PGRST116') {
-          throw budgetError;
+        console.log('予算取得結果:', {
+          budgetData,
+          budgetError,
+          userId: user.id,
+          month: formattedDate,
+          query: {
+            table: 'budgets',
+            filters: {
+              user_id: user.id,
+              month: formattedDate
+            }
+          }
+        });
+
+        if (budgetError) {
+          console.error('予算取得エラーの詳細:', {
+            code: budgetError.code,
+            message: budgetError.message,
+            details: budgetError.details,
+            hint: budgetError.hint
+          });
+          if (budgetError.code !== 'PGRST116') {
+            throw budgetError;
+          }
         }
 
         // この月の収入（給与含む）を取得
@@ -60,6 +93,83 @@ export default function BudgetPage() {
         const currentMonthStart = `${selectedMonth}-01`;
         const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
 
+        // 給与収入を取得
+        const fromDay = 1;  // 月の初日
+        const toDay = lastDay;  // 月の最終日
+
+        console.log('給与検索条件:', {
+          month: {
+            year,
+            month,
+            selectedMonth,
+            fromDay,
+            toDay,
+            lastDay
+          }
+        });
+
+        const { data: salaryData, error: salaryError } = await supabase
+          .from('salaries')
+          .select('amount, status, payday')
+          .eq('user_id', user.id)
+          .eq('status', 'unpaid')
+          .gte('payday', fromDay)
+          .lte('payday', toDay);
+
+        console.log('給与データ取得結果:', {
+          rawData: salaryData,
+          error: salaryError,
+          userId: user.id,
+          query: {
+            table: 'salaries',
+            filters: {
+              user_id: user.id,
+              status: 'unpaid',
+              payday: {
+                gte: fromDay,
+                lte: toDay
+              }
+            }
+          },
+          dataDetails: salaryData?.map(s => ({
+            amount: s.amount,
+            status: s.status,
+            payday: s.payday
+          }))
+        });
+
+        if (salaryError) throw salaryError;
+
+        // 給与収入を計算
+        const salaryIncome = salaryData?.reduce((sum, s) => {
+          const amount = typeof s.amount === 'number' ? s.amount : 0;
+          console.log('給与データ処理:', {
+            current: s,
+            amount,
+            currentSum: sum,
+            type: {
+              amount: typeof s.amount,
+              status: typeof s.status,
+              payday: typeof s.payday,
+              sum: typeof sum
+            }
+          });
+          return sum + amount;
+        }, 0) || 0;
+
+        console.log('給与収入計算結果:', {
+          finalAmount: salaryIncome,
+          dataLength: salaryData?.length,
+          dataTypes: salaryData?.map(s => ({
+            amount: typeof s.amount,
+            status: typeof s.status,
+            payday: typeof s.payday
+          }))
+        });
+
+        setSalaryIncome(salaryIncome);
+
+        // その他の収入を取得
         const { data: incomeData, error: incomeError } = await supabase
           .from('transactions')
           .select('amount')
@@ -70,8 +180,12 @@ export default function BudgetPage() {
 
         if (incomeError) throw incomeError;
 
+        // その他の収入を計算
+        const otherIncome = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+        setOtherIncome(otherIncome);
+
         // 総収入を計算
-        const totalIncome = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+        const totalIncome = salaryIncome + otherIncome;
         setTotalIncome(totalIncome);
 
         // 予算データを設定
@@ -118,36 +232,74 @@ export default function BudgetPage() {
         return;
       }
 
-      // 給料による収入を取得
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const lastDay = new Date(year, month, 0).getDate();
-      const currentMonthStart = `${selectedMonth}-01`;
-      const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-      const { data: salaryData, error: salaryError } = await supabase
-        .from('transactions')
-        .select('amount')
-        .eq('user_id', user.id)
-        .eq('type', 'income')
-        .eq('category_id', 1) // 給与カテゴリー
-        .gte('date', currentMonthStart)
-        .lte('date', currentMonthEnd);
-
-      if (salaryError) throw salaryError;
-
-      const totalSalary = salaryData?.reduce((sum, t) => sum + t.amount, 0) || 0;
       const baseBudget = Number(editedAmount);
 
       if (baseBudget < 0) {
         throw new Error('予算額は0以上である必要があります');
       }
 
+      // 給与収入を取得
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+      const currentMonthStart = `${selectedMonth}-01`;
+      const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+
+      // 月の日付を整数値で設定（1-31）
+      const fromDay = 1;  // 月の初日
+      const toDay = lastDay;  // 月の最終日
+
+      console.log('給与検索条件:', {
+        month: {
+          year,
+          month,
+          selectedMonth,
+          fromDay,
+          toDay,
+          lastDay
+        }
+      });
+
+      const { data: salaryData, error: salaryError } = await supabase
+        .from('salaries')
+        .select('amount, status, payday')
+        .eq('user_id', user.id)
+        .eq('status', 'unpaid')
+        .gte('payday', fromDay)
+        .lte('payday', toDay);
+
+      console.log('給与データ取得結果:', {
+        rawData: salaryData,
+        error: salaryError,
+        userId: user.id,
+        query: {
+          table: 'salaries',
+          filters: {
+            user_id: user.id,
+            status: 'unpaid',
+            payday: {
+              gte: fromDay,
+              lte: toDay
+            }
+          }
+        },
+        dataDetails: salaryData?.map(s => ({
+          amount: s.amount,
+          status: s.status,
+          payday: s.payday
+        }))
+      });
+
+      if (salaryError) throw salaryError;
+
+      const monthDate = new Date(`${selectedMonth}-01`);
+      const formattedDate = monthDate.toISOString().split('T')[0];
+
       // 既存の予算を確認
       const { data: existingBudget, error: checkError } = await supabase
         .from('budgets')
         .select('*')
         .eq('user_id', user.id)
-        .eq('month', `${selectedMonth}-01`)
+        .eq('month', formattedDate)
         .single();
 
       if (checkError && checkError.code !== 'PGRST116') {
@@ -168,7 +320,7 @@ export default function BudgetPage() {
           .from('budgets')
           .insert({
             user_id: user.id,
-            month: `${selectedMonth}-01`,
+            month: formattedDate,
             amount: baseBudget
           });
 
@@ -178,7 +330,7 @@ export default function BudgetPage() {
       setBudget({
         id: existingBudget?.id || 0,
         user_id: user.id,
-        month: `${selectedMonth}-01`,
+        month: formattedDate,
         amount: baseBudget
       });
       setIsEditing(false);
@@ -306,8 +458,32 @@ export default function BudgetPage() {
               <div className="text-sm font-medium text-gray-700 mb-2">
                 今月の収入
               </div>
-              <div className="text-2xl font-bold text-emerald-600">
-                ¥{totalIncome.toLocaleString()}
+              <div className="space-y-2">
+                <div>
+                  <div className="text-sm text-gray-600">給与収入</div>
+                  <div className="text-xl font-bold text-emerald-600">
+                    {salaryIncome > 0 ? (
+                      <div className="flex items-center">
+                        <span>¥{salaryIncome.toLocaleString()}</span>
+                        <span className="ml-2 text-sm font-normal text-amber-600">（未入金）</span>
+                      </div>
+                    ) : (
+                      <span>¥0</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">その他の収入</div>
+                  <div className="text-xl font-bold text-emerald-600">
+                    ¥{otherIncome.toLocaleString()}
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-gray-200">
+                  <div className="text-sm text-gray-600">合計収入</div>
+                  <div className="text-2xl font-bold text-emerald-600">
+                    ¥{totalIncome.toLocaleString()}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

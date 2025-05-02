@@ -15,6 +15,18 @@ interface Budget {
   group_id: string;
 }
 
+interface Salary {
+  amount: number;
+  status: string;
+  payday: number;
+}
+
+interface GroupMember {
+  user_id: string;
+  salary_id: number | null;
+  salaries: Salary | null;
+}
+
 export default function GroupBudgetPage() {
   const router = useRouter();
   const params = useParams();
@@ -25,6 +37,8 @@ export default function GroupBudgetPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedAmount, setEditedAmount] = useState('');
   const [totalIncome, setTotalIncome] = useState(0);
+  const [salaryIncome, setSalaryIncome] = useState(0);
+  const [otherIncome, setOtherIncome] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -45,45 +59,100 @@ export default function GroupBudgetPage() {
         }
 
         // グループの予算を取得
+        const groupId = params.groupId as string;
+        if (!groupId) {
+          throw new Error('Invalid group ID');
+        }
+
+        const monthDate = new Date(`${selectedMonth}-01`);
+        const formattedDate = monthDate.toISOString().split('T')[0];
+
+        // グループの予算を取得
         const { data: budgetData, error: budgetError } = await supabase
           .from('group_budgets')
           .select('*')
-          .eq('group_id', params.groupId as string)
-          .eq('month', `${selectedMonth}-01`)
+          .eq('group_id', groupId)
+          .eq('month', formattedDate)
           .single();
+
+        console.log('予算取得結果:', {
+          budgetData,
+          budgetError,
+          month: formattedDate
+        });
 
         if (budgetError && budgetError.code !== 'PGRST116') {
           throw budgetError;
         }
 
-        // この月の収入を取得
+        // 予算データを設定（収入は含めない）
+        setBudget(budgetData);
+        setEditedAmount(budgetData ? String(budgetData.amount) : '');
+
+        // 給与収入を取得
         const [year, month] = selectedMonth.split('-').map(Number);
         const lastDay = new Date(year, month, 0).getDate();
-        const currentMonthStart = `${selectedMonth}-01`;
-        const currentMonthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
+        const fromDay = 1;  // 月の初日
+        const toDay = lastDay;  // 月の最終日
 
+        // グループメンバーの給与情報を取得
+        const { data: membersData, error: membersError } = await supabase
+          .from('group_members')
+          .select('user_id')
+          .eq('group_id', groupId);
+
+        if (membersError) throw membersError;
+
+        // メンバーの給与情報を取得
+        const memberIds = membersData?.map(m => m.user_id) || [];
+        const { data: salaryData, error: salaryError } = await supabase
+          .from('salaries')
+          .select('amount, status, payday, user_id')
+          .in('user_id', memberIds)
+          .eq('status', 'unpaid')
+          .gte('payday', fromDay)
+          .lte('payday', toDay);
+
+        if (salaryError) throw salaryError;
+
+        // 給与収入を計算
+        const salaryIncome = salaryData?.reduce((sum, salary) => {
+          const amount = typeof salary.amount === 'number' ? salary.amount : 0;
+          return sum + amount;
+        }, 0) || 0;
+
+        console.log('給与収入計算結果:', {
+          salaryIncome,
+          salaryCount: salaryData?.length
+        });
+
+        setSalaryIncome(salaryIncome);
+
+        // その他の収入を取得
         const { data: incomeData, error: incomeError } = await supabase
           .from('transactions')
           .select('amount')
-          .eq('group_id', params.groupId as string)
+          .eq('group_id', groupId)
           .eq('type', 'income')
-          .gte('date', currentMonthStart)
-          .lte('date', currentMonthEnd);
+          .gte('date', `${selectedMonth}-01`)
+          .lte('date', `${selectedMonth}-${String(lastDay).padStart(2, '0')}`);
 
         if (incomeError) throw incomeError;
 
-        // 総収入を計算
-        const totalIncome = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+        // その他の収入を計算
+        const otherIncome = incomeData?.reduce((sum, t) => sum + t.amount, 0) || 0;
+        setOtherIncome(otherIncome);
+
+        // 総収入を計算（予算とは別に管理）
+        const totalIncome = salaryIncome + otherIncome;
         setTotalIncome(totalIncome);
 
-        // 予算データを設定
-        setBudget(budgetData);
-        if (!budgetData && totalIncome === 0) {
-          setEditedAmount('');  // 予算も収入もない場合は空文字列
-        } else {
-          // 予算額のみを表示（収入は含めない）
-          setEditedAmount(String(budgetData?.amount || 0));
-        }
+        console.log('最終計算結果:', {
+          budget: budgetData?.amount,
+          salaryIncome,
+          otherIncome,
+          totalIncome
+        });
 
       } catch (error) {
         if (!isMounted) return;
@@ -99,7 +168,7 @@ export default function GroupBudgetPage() {
     return () => {
       isMounted = false;
     };
-  }, [router, selectedMonth, params.groupId]);
+  }, [selectedMonth, params.groupId]);
 
   const handleNavigation = (href: string) => {
     setLoading(true);
@@ -120,12 +189,20 @@ export default function GroupBudgetPage() {
         throw new Error('予算額は0以上である必要があります');
       }
 
+      console.log('予算保存開始:', {
+        baseBudget,
+        selectedMonth
+      });
+
+      const monthDate = new Date(`${selectedMonth}-01`);
+      const formattedDate = monthDate.toISOString().split('T')[0];
+
       // 既存の予算を確認
       const { data: existingBudget, error: checkError } = await supabase
         .from('group_budgets')
         .select('*')
         .eq('group_id', params.groupId as string)
-        .eq('month', `${selectedMonth}-01`)
+        .eq('month', formattedDate)
         .single();
 
       if (checkError && checkError.code !== 'PGRST116') {
@@ -133,7 +210,7 @@ export default function GroupBudgetPage() {
       }
 
       if (existingBudget) {
-        // 既存の予算を更新
+        // 既存の予算を更新（収入は含めない）
         const { error: updateError } = await supabase
           .from('group_budgets')
           .update({ amount: baseBudget })
@@ -141,22 +218,29 @@ export default function GroupBudgetPage() {
 
         if (updateError) throw updateError;
       } else {
-        // 新規予算を作成
+        // 新規予算を作成（収入は含めない）
         const { error: insertError } = await supabase
           .from('group_budgets')
           .insert({
             group_id: params.groupId as string,
-            month: `${selectedMonth}-01`,
+            month: formattedDate,
             amount: baseBudget
           });
 
         if (insertError) throw insertError;
       }
 
+      console.log('予算保存完了:', {
+        baseBudget,
+        month: formattedDate,
+        existingBudget: existingBudget?.id
+      });
+
+      // 予算データのみを更新（収入は含めない）
       setBudget({
         id: existingBudget?.id || 0,
         group_id: params.groupId as string,
-        month: `${selectedMonth}-01`,
+        month: formattedDate,
         amount: baseBudget
       });
       setIsEditing(false);
@@ -287,8 +371,32 @@ export default function GroupBudgetPage() {
                 <div className="text-sm font-medium text-gray-700 mb-2">
                   今月の収入
                 </div>
-                <div className="text-2xl font-bold text-emerald-600">
-                  ¥{totalIncome.toLocaleString()}
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-sm text-gray-600">給与収入</div>
+                    <div className="text-xl font-bold text-emerald-600">
+                      {salaryIncome > 0 ? (
+                        <div className="flex items-center">
+                          <span>¥{salaryIncome.toLocaleString()}</span>
+                          <span className="ml-2 text-sm font-normal text-amber-600">（未入金）</span>
+                        </div>
+                      ) : (
+                        <span>¥0</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-600">その他の収入</div>
+                    <div className="text-xl font-bold text-emerald-600">
+                      ¥{otherIncome.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-gray-200">
+                    <div className="text-sm text-gray-600">合計収入</div>
+                    <div className="text-2xl font-bold text-emerald-600">
+                      ¥{totalIncome.toLocaleString()}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

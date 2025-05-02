@@ -93,20 +93,65 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
 
   // 収支の計算
   const { totalIncome, totalExpense, categoryExpenses, salaryIncome, otherIncome } = useMemo(() => {
+    console.log('収支計算開始:', {
+      transactions,
+      salaries,
+      budgets
+    });
+
     // 給与収入の計算
-    const salaryIncome = salaries.reduce((sum, s) => sum + s.amount, 0);
+    const salaryIncome = salaries.reduce((sum, s) => {
+      console.log('給与計算:', {
+        salary: s,
+        currentSum: sum,
+        amount: s.amount,
+        newSum: sum + (s.amount || 0)
+      });
+      return sum + (s.amount || 0);
+    }, 0);
+
+    console.log('給与収入計算結果:', {
+      salaryIncome,
+      salaries,
+      salaryCount: salaries.length,
+      salaryAmounts: salaries.map(s => s.amount)
+    });
 
     // その他の収入の計算
     const otherIncome = transactions
       .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => {
+        console.log('その他の収入計算:', {
+          transaction: t,
+          currentSum: sum,
+          amount: t.amount,
+          newSum: sum + t.amount
+        });
+        return sum + t.amount;
+      }, 0);
 
     const totalIncome = salaryIncome + otherIncome;
+
+    console.log('収入計算結果:', {
+      salaryIncome,
+      otherIncome,
+      totalIncome,
+      transactionCount: transactions.length,
+      incomeTransactions: transactions.filter(t => t.type === 'income')
+    });
 
     // 支出の計算
     const expense = transactions
       .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum, t) => {
+        console.log('支出計算:', {
+          transaction: t,
+          currentSum: sum,
+          amount: t.amount,
+          newSum: sum + t.amount
+        });
+        return sum + t.amount;
+      }, 0);
 
     const categoryExpenses = transactions
       .filter(t => t.type === 'expense')
@@ -115,6 +160,15 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
         acc[category] = (acc[category] || 0) + t.amount;
         return acc;
       }, {} as { [key: string]: number });
+
+    console.log('最終計算結果:', {
+      totalIncome,
+      totalExpense: expense,
+      categoryExpenses,
+      salaryIncome,
+      otherIncome,
+      expenseTransactions: transactions.filter(t => t.type === 'expense')
+    });
 
     return {
       totalIncome,
@@ -127,18 +181,40 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
 
   // 予算と収支の計算
   const budgetCalculations = useMemo(() => {
-    const baseBudget = budgets.length > 0 ? budgets[0].amount : 0;
-    const adjustedBudget = baseBudget + otherIncome;
+    console.log('予算計算開始:', {
+      budgets,
+      otherIncome,
+      totalExpense,
+      salaryIncome
+    });
+
+    // 予算の計算
+    const baseBudget = budgets[0]?.amount || 0;
     const usedAmount = totalExpense;
+    // 予算額のみを使用（収入は含めない）
+    const adjustedBudget = baseBudget;
     const remainingAmount = Math.max(0, adjustedBudget - usedAmount);
 
-    return {
+    console.log('予算計算結果:', {
       baseBudget,
+      otherIncome,
+      salaryIncome,
       adjustedBudget,
       usedAmount,
       remainingAmount
+    });
+
+    return {
+      totalIncome,
+      totalExpense,
+      categoryExpenses,
+      salaryIncome,
+      otherIncome,
+      adjustedBudget,
+      remainingAmount,
+      usedAmount
     };
-  }, [budgets, otherIncome, totalExpense]);
+  }, [budgets, otherIncome, totalExpense, salaryIncome]);
 
   // チャートデータの作成
   const chartData: ChartData = useMemo(() => {
@@ -221,8 +297,55 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
         `)
         .in('user_id', formattedMembers.map(m => m.user_id));
 
-      if (salariesError) throw salariesError;
-      console.log('給与情報:', salariesData);
+      console.log('給与データ取得詳細:', {
+        salariesData,
+        salariesError,
+        memberIds: formattedMembers.map(m => m.user_id),
+        query: {
+          table: 'salaries',
+          select: ['id', 'amount', 'payday', 'user_id'],
+          user_ids: formattedMembers.map(m => m.user_id)
+        }
+      });
+
+      if (salariesError) {
+        console.error('給与データ取得エラー:', salariesError);
+        throw salariesError;
+      }
+
+      if (!salariesData || salariesData.length === 0) {
+        console.warn('給与データが取得できませんでした:', {
+          members: formattedMembers,
+          salariesData
+        });
+      }
+
+      // 給与データの検証
+      const validatedSalaries = (salariesData || [])
+        .filter((salary): salary is Salary => {
+          if (!salary.amount || salary.amount <= 0) {
+            console.warn('無効な給与データ:', salary);
+            return false;
+          }
+          return true;
+        });
+
+      console.log('検証済み給与データ:', {
+        original: salariesData,
+        validated: validatedSalaries,
+        memberCount: formattedMembers.length,
+        salaryCount: validatedSalaries.length
+      });
+
+      // 給与データの計算を確認
+      const totalSalary = validatedSalaries.reduce((sum, s) => sum + s.amount, 0);
+      console.log('給与合計計算:', {
+        totalSalary,
+        salaries: validatedSalaries.map(s => ({
+          user_id: s.user_id,
+          amount: s.amount
+        }))
+      });
 
       const formattedGroup: Group = {
         id: groupData.id,
@@ -266,7 +389,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
 
       if (budgetsError) throw budgetsError;
       setBudgets(budgetsData || []);
-      setSalaries(salariesData || []);
+      setSalaries(validatedSalaries);
 
     } catch (err) {
       console.error('Error fetching data:', err);
