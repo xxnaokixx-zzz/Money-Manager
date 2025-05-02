@@ -130,7 +130,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
         return sum + t.amount;
       }, 0);
 
-    const totalIncome = salaryIncome + otherIncome;
+    const totalIncome = otherIncome;  // 未入金の給与収入は含めない
 
     console.log('収入計算結果:', {
       salaryIncome,

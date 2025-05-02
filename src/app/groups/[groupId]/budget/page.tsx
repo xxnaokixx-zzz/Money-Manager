@@ -144,7 +144,7 @@ export default function GroupBudgetPage() {
         setOtherIncome(otherIncome);
 
         // 総収入を計算（予算とは別に管理）
-        const totalIncome = salaryIncome + otherIncome;
+        const totalIncome = otherIncome;  // 未入金の給与収入は含めない
         setTotalIncome(totalIncome);
 
         console.log('最終計算結果:', {

@@ -16,13 +16,8 @@ export default function Header() {
     setMounted(true);
   }, []);
 
-  const menuItems = [
-    { href: '/transactions', label: '取引履歴' },
-    { href: '/add', label: '新規記録' },
-    { href: '/budget', label: '予算管理' },
-    { href: '/salary', label: '給料設定' },
-    { href: '/groups', label: 'グループ一覧' },
-    { href: '/groups/new', label: 'グループ作成' },
+  const menuItems: { href: string; label: string }[] = [
+    // 指定されたリンクを削除
   ];
 
   const handleNavigation = (href: string) => {

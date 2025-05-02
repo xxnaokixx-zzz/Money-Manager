@@ -185,7 +185,7 @@ export default function BudgetPage() {
         setOtherIncome(otherIncome);
 
         // 総収入を計算
-        const totalIncome = salaryIncome + otherIncome;
+        const totalIncome = otherIncome;  // 未入金の給与収入は含めない
         setTotalIncome(totalIncome);
 
         // 予算データを設定
