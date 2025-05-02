@@ -593,25 +593,6 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
                   <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
                   <span className="text-sm text-slate-600">給料日設定</span>
                 </div>
-                <Link
-                  href={`/groups/${groupId}/salary`}
-                  className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                >
-                  <svg
-                    className="w-4 h-4 mr-1"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                  設定
-                </Link>
               </div>
             </div>
             {salaries.length > 0 ? (
@@ -716,7 +697,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
                             days.push(
                               <div
                                 key={i}
-                                className="relative"
+                                className="relative group"
                               >
                                 <div
                                   className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
@@ -731,7 +712,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
                                   <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
                                 )}
                                 {paydayMembers.length > 0 && (
-                                  <div className="absolute -bottom-6 left-0 right-0 text-xs text-slate-600 truncate">
+                                  <div className="absolute left-full top-[calc(50%+4px)] -translate-y-1/2 ml-1 bg-white shadow-md rounded-md px-2 py-1 text-xs text-slate-600 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                     {paydayMembers.map(s => {
                                       const member = group.members.find(m => m.user_id === s.user_id);
                                       return member?.name;
