@@ -84,6 +84,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().split('T')[0].slice(0, 7));
   const [displayDate, setDisplayDate] = useState(new Date());
+  const [showMessage, setShowMessage] = useState<string | null>(null);
   const router = useRouter();
   const { user } = useAuth();
 
@@ -493,119 +494,186 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
               </div>
             </div>
             {salaries.length > 0 ? (
-              <div className="flex justify-between items-center gap-8">
-                <div className="flex-1 space-y-6">
-                  <div>
-                    <div className="text-base text-gray-500">次の給料日</div>
-                    <div className="text-2xl font-bold text-slate-900">
-                      {(() => {
-                        const today = new Date();
-                        const year = today.getFullYear();
-                        const month = today.getMonth();
-                        const payday = salaries[0].payday;
-                        let nextPayday = new Date(year, month, payday);
-                        if (today > nextPayday) {
-                          nextPayday = new Date(year, month + 1, payday);
-                        }
-                        const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        return (
-                          <>
-                            {nextPayday.getMonth() + 1}月{payday}日
-                            <span className="ml-2 text-base font-normal text-slate-600">
-                              （あと{diffDays}日）
-                            </span>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-base text-gray-500">給料総額</div>
-                    <div className="text-2xl font-bold text-slate-900">
-                      ¥{salaries.reduce((sum, s) => sum + s.amount, 0).toLocaleString()}
+              <div className="space-y-6">
+                <div className="flex justify-between items-center gap-8">
+                  <div className="flex-1">
+                    <div className="bg-slate-50 rounded-lg p-4">
+                      <div className="flex justify-between items-center mb-3">
+                        <button
+                          onClick={() => {
+                            const newDate = new Date(displayDate);
+                            newDate.setMonth(newDate.getMonth() - 1);
+                            setDisplayDate(newDate);
+                          }}
+                          className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                        >
+                          <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <div className="text-center">
+                          <div className="font-medium text-slate-700">
+                            {displayDate.getFullYear()}年{displayDate.getMonth() + 1}月
+                          </div>
+                          {(() => {
+                            const today = new Date();
+                            const year = today.getFullYear();
+                            const month = today.getMonth();
+
+                            // 最も近い給料日を計算
+                            const nextPaydays = salaries.map(salary => {
+                              let payday = new Date(year, month, salary.payday);
+                              if (today > payday) {
+                                payday = new Date(year, month + 1, salary.payday);
+                              }
+                              return payday;
+                            });
+
+                            const nextPayday = nextPaydays.reduce((closest, current) => {
+                              return current < closest ? current : closest;
+                            });
+
+                            const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                            // 次の給料日が同じメンバーを取得
+                            const nextPaydayMembers = salaries
+                              .filter(s => s.payday === nextPayday.getDate())
+                              .map(s => {
+                                const member = group.members.find(m => m.user_id === s.user_id);
+                                return member?.name;
+                              })
+                              .filter(Boolean);
+
+                            return (
+                              <div className="text-sm text-blue-600 font-medium">
+                                次の給料日まであと{diffDays}日
+                                <span className="text-xs text-gray-600 ml-2">
+                                  ({nextPayday.getMonth() + 1}月{nextPayday.getDate()}日: {nextPaydayMembers.join(', ')})
+                                </span>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <button
+                          onClick={() => {
+                            const newDate = new Date(displayDate);
+                            newDate.setMonth(newDate.getMonth() + 1);
+                            setDisplayDate(newDate);
+                          }}
+                          className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                        >
+                          <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                        {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
+                          <div key={day} className="text-slate-500 font-medium">
+                            {day}
+                          </div>
+                        ))}
+                        {(() => {
+                          const firstDay = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
+                          const lastDay = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
+                          const days = [];
+                          const today = new Date();
+
+                          // 月初めの空白を追加
+                          for (let i = 0; i < firstDay.getDay(); i++) {
+                            days.push(<div key={`empty-${i}`} />);
+                          }
+
+                          // 日付を追加
+                          for (let i = 1; i <= lastDay.getDate(); i++) {
+                            const paydayMembers = salaries.filter(s => s.payday === i);
+                            const isToday = i === today.getDate() &&
+                              today.getMonth() === displayDate.getMonth() &&
+                              today.getFullYear() === displayDate.getFullYear();
+
+                            days.push(
+                              <div
+                                key={i}
+                                className="relative"
+                              >
+                                <div
+                                  className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
+                                    ${paydayMembers.length > 0 ? 'bg-blue-500 text-white font-bold' : ''}
+                                    ${isToday && paydayMembers.length === 0 ? 'border-2 border-slate-300' : ''}
+                                    ${!paydayMembers.length && !isToday ? 'text-slate-700' : ''}
+                                  `}
+                                >
+                                  {i}
+                                </div>
+                                {paydayMembers.length > 0 && (
+                                  <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
+                                )}
+                                {paydayMembers.length > 0 && (
+                                  <div className="absolute -bottom-6 left-0 right-0 text-xs text-slate-600 truncate">
+                                    {paydayMembers.map(s => {
+                                      const member = group.members.find(m => m.user_id === s.user_id);
+                                      return member?.name;
+                                    }).join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return days;
+                        })()}
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="flex-1">
-                  <div className="bg-slate-50 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-3">
-                      <button
-                        onClick={() => {
-                          const newDate = new Date(displayDate);
-                          newDate.setMonth(newDate.getMonth() - 1);
-                          setDisplayDate(newDate);
-                        }}
-                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                      </button>
-                      <div className="font-medium text-slate-700">
-                        {displayDate.getFullYear()}年{displayDate.getMonth() + 1}月
-                      </div>
-                      <button
-                        onClick={() => {
-                          const newDate = new Date(displayDate);
-                          newDate.setMonth(newDate.getMonth() + 1);
-                          setDisplayDate(newDate);
-                        }}
-                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-base font-semibold text-gray-800">メンバー別給与</h3>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-500">給与総額</p>
+                      <p className="text-lg font-bold text-slate-900">
+                        ¥{salaries.reduce((sum, s) => sum + s.amount, 0).toLocaleString()}
+                      </p>
                     </div>
-                    <div className="grid grid-cols-7 gap-2 text-center text-sm">
-                      {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
-                        <div key={day} className="text-slate-500 font-medium">
-                          {day}
-                        </div>
-                      ))}
-                      {(() => {
-                        const firstDay = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
-                        const lastDay = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
-                        const days = [];
-                        const today = new Date();
-
-                        // 月初めの空白を追加
-                        for (let i = 0; i < firstDay.getDay(); i++) {
-                          days.push(<div key={`empty-${i}`} />);
-                        }
-
-                        // 日付を追加
-                        for (let i = 1; i <= lastDay.getDate(); i++) {
-                          const isPayday = salaries.some(s => s.payday === i);
-                          const isToday = i === today.getDate() &&
-                            today.getMonth() === displayDate.getMonth() &&
-                            today.getFullYear() === displayDate.getFullYear();
-
-                          days.push(
-                            <div
-                              key={i}
-                              className="relative"
-                            >
-                              <div
-                                className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
-                                  ${isPayday ? 'bg-blue-500 text-white font-bold' : ''}
-                                  ${isToday && !isPayday ? 'border-2 border-slate-300' : ''}
-                                  ${!isPayday && !isToday ? 'text-slate-700' : ''}
-                                `}
-                              >
-                                {i}
-                              </div>
-                              {isPayday && (
-                                <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
-                              )}
+                  </div>
+                  <div className="space-y-4">
+                    {group.members.map((member) => {
+                      const memberSalary = salaries.find(s => s.user_id === member.user_id);
+                      return (
+                        <div
+                          key={member.user_id}
+                          className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 cursor-pointer hover:bg-gray-50 transition-colors"
+                          onClick={() => {
+                            if (member.user_id === user?.id) {
+                              router.push('/salary');
+                            } else {
+                              setShowMessage(`${member.name}さんの給与設定は本人のみが可能です`);
+                              setTimeout(() => setShowMessage(null), 3000);
+                            }
+                          }}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-800">{member.name}</h3>
+                              <p className="text-sm text-gray-500">{member.role}</p>
                             </div>
-                          );
-                        }
-
-                        return days;
-                      })()}
-                    </div>
+                            {memberSalary && (
+                              <div className="text-right">
+                                <p className="text-sm text-gray-500">現在の給与</p>
+                                <p className="font-semibold text-blue-500">
+                                  ¥{memberSalary.amount.toLocaleString()}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {memberSalary.payday}日支払い
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -621,6 +689,12 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
               </div>
             )}
           </div>
+
+          {showMessage && (
+            <div className="fixed bottom-4 right-4 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg animate-fade-in-out">
+              {showMessage}
+            </div>
+          )}
 
           {/* メンバー一覧 */}
           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
