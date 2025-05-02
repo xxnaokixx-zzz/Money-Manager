@@ -62,7 +62,6 @@ interface Salary {
   amount: number;
   payday: number;
   user_id: string;
-  group_id: number;
 }
 
 interface ChartData {
@@ -94,16 +93,17 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
 
   // 収支の計算
   const { totalIncome, totalExpense, categoryExpenses, salaryIncome, otherIncome } = useMemo(() => {
-    const salaryIncome = transactions
-      .filter(t => t.type === 'income' && t.categories?.name === '給与')
-      .reduce((sum, t) => sum + t.amount, 0);
+    // 給与収入の計算
+    const salaryIncome = salaries.reduce((sum, s) => sum + s.amount, 0);
 
+    // その他の収入の計算
     const otherIncome = transactions
-      .filter(t => t.type === 'income' && t.categories?.name !== '給与')
+      .filter(t => t.type === 'income')
       .reduce((sum, t) => sum + t.amount, 0);
 
     const totalIncome = salaryIncome + otherIncome;
 
+    // 支出の計算
     const expense = transactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + t.amount, 0);
@@ -123,7 +123,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
       salaryIncome,
       otherIncome
     };
-  }, [transactions]);
+  }, [transactions, salaries]);
 
   // 予算と収支の計算
   const budgetCalculations = useMemo(() => {
@@ -193,38 +193,36 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
         .select(`
           user_id,
           role,
-          salary_id,
           users (
             id,
             name
-          ),
-          salaries!left (
-            id,
-            amount,
-            payday
           )
         `)
-        .eq('group_id', groupId)
-        .eq('salaries.group_id', groupId);
+        .eq('group_id', groupId);
 
       if (membersError) throw membersError;
+      console.log('グループメンバー情報:', membersData);
 
       const formattedMembers = membersData.map((m: any) => ({
         user_id: m.user_id,
         name: m.users.name,
-        role: m.role,
-        salary_id: m.salary_id
+        role: m.role
       }));
+      console.log('フォーマット済みメンバー情報:', formattedMembers);
 
-      const salariesData: Salary[] = membersData
-        .filter((m: any) => m.salary_id && m.salaries)
-        .map((m: any) => ({
-          id: m.salaries.id,
-          amount: m.salaries.amount,
-          payday: m.salaries.payday,
-          user_id: m.user_id,
-          group_id: parseInt(groupId)
-        }));
+      // メンバーの給与情報を取得
+      const { data: salariesData, error: salariesError } = await supabase
+        .from('salaries')
+        .select(`
+          id,
+          amount,
+          payday,
+          user_id
+        `)
+        .in('user_id', formattedMembers.map(m => m.user_id));
+
+      if (salariesError) throw salariesError;
+      console.log('給与情報:', salariesData);
 
       const formattedGroup: Group = {
         id: groupData.id,
@@ -268,7 +266,7 @@ export default function GroupHomePage(props: { params: { groupId: string } }) {
 
       if (budgetsError) throw budgetsError;
       setBudgets(budgetsData || []);
-      setSalaries(salariesData);
+      setSalaries(salariesData || []);
 
     } catch (err) {
       console.error('Error fetching data:', err);

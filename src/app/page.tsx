@@ -775,16 +775,17 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
             <div className="flex-1">
-              <div className="bg-slate-50 rounded-lg p-4">
-                <div className="flex justify-between items-center mb-3">
+              <div className="bg-white rounded-lg p-4">
+                <div className="flex justify-between items-center mb-4">
                   <button
                     onClick={() => {
                       const newDate = new Date(displayDate);
                       newDate.setMonth(newDate.getMonth() - 1);
                       setDisplayDate(newDate);
                     }}
-                    className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
                   >
                     <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -799,16 +800,16 @@ export default function Home() {
                       newDate.setMonth(newDate.getMonth() + 1);
                       setDisplayDate(newDate);
                     }}
-                    className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
                   >
                     <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
                 </div>
-                <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                <div className="grid grid-cols-7 gap-1">
                   {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
-                    <div key={day} className="text-slate-500 font-medium">
+                    <div key={day} className="text-center text-sm text-slate-500">
                       {day}
                     </div>
                   ))}
@@ -818,9 +819,9 @@ export default function Home() {
                     const days = [];
                     const today = new Date();
 
-                    // 月初めの空白を追加
+                    // 月初めの空きマスを追加
                     for (let i = 0; i < firstDay.getDay(); i++) {
-                      days.push(<div key={`empty-${i}`} />);
+                      days.push(<div key={`empty-${i}`}></div>);
                     }
 
                     // 日付を追加

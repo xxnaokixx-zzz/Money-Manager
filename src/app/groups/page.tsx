@@ -106,43 +106,114 @@ export default function GroupsPage() {
   }, [router]);
 
   const handleDeleteGroup = async (groupId: number) => {
-    if (!window.confirm('本当にこのグループを削除しますか？')) {
+    if (!window.confirm('本当にこのグループを削除しますか？\n※メンバーと給与情報は保持されます。')) {
       return;
     }
 
     setDeletingGroupId(groupId);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      // セッション情報の取得と確認
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('セッション取得エラー:', sessionError);
+        throw new Error('セッションの取得に失敗しました。再度ログインしてください。');
+      }
       if (!session) {
-        throw new Error('認証エラーが発生しました');
+        throw new Error('認証エラーが発生しました。再度ログインしてください。');
       }
 
-      // まずメンバーを削除
-      const { error: memberError } = await supabase
+      // グループの存在確認
+      const { data: groupData, error: groupCheckError } = await supabase
+        .from('groups')
+        .select('id, created_by')
+        .eq('id', groupId)
+        .single();
+
+      if (groupCheckError) {
+        console.error('グループ確認エラー:', groupCheckError);
+        throw new Error('グループの確認に失敗しました。');
+      }
+
+      if (!groupData) {
+        throw new Error('指定されたグループが見つかりません。');
+      }
+
+      if (groupData.created_by !== session.user.id) {
+        throw new Error('このグループを削除する権限がありません。');
+      }
+
+      // グループメンバー情報を取得
+      const { data: membersData, error: membersError } = await supabase
         .from('group_members')
-        .delete()
-        .eq('group_id', groupId);
+        .select(`
+          group_id,
+          role,
+          users (
+            id,
+            name
+          )
+        `)
+        .eq('user_id', session.user.id);
 
-      if (memberError) {
-        throw memberError;
-      }
+      if (membersError) throw membersError;
 
-      // 次にグループを削除
-      const { error: groupError } = await supabase
+      // 給与情報を取得
+      const { data: salariesData, error: salariesError } = await supabase
+        .from('salaries')
+        .select(`
+          id,
+          amount,
+          payday,
+          user_id
+        `)
+        .eq('user_id', session.user.id)
+        .single();
+
+      if (salariesError) throw salariesError;
+
+      const formattedGroups = membersData.map((member: any) => ({
+        id: member.group_id,
+        name: member.users.name,
+        role: member.role,
+        hasSalary: !!salariesData,
+        description: '',
+        created_at: new Date().toISOString(),
+        created_by: session.user.id,
+        members: []
+      }));
+
+      setGroups(formattedGroups);
+
+      // グループを削除
+      console.log('グループの削除を開始...');
+      const { data: deletedGroup, error: groupError } = await supabase
         .from('groups')
         .delete()
         .eq('id', groupId)
-        .eq('created_by', session.user.id);
+        .eq('created_by', session.user.id)
+        .select();
 
       if (groupError) {
-        throw groupError;
+        console.error('グループ削除に失敗:', groupError);
+        throw new Error('グループの削除に失敗しました。再度お試しください。');
       }
+
+      console.log('グループ削除完了:', deletedGroup);
 
       // 成功したら、グループリストから削除
       setGroups(groups.filter(g => g.id !== groupId));
+
+      // 成功メッセージを表示
+      setError(null);
+      alert('グループが正常に削除されました。\n※給与情報とメンバー情報は保持されています。');
+
     } catch (error) {
-      console.error('Error deleting group:', error);
-      setError('グループの削除に失敗しました');
+      console.error('グループ削除処理でエラーが発生:', error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : '予期しないエラーが発生しました。再度お試しください。';
+      setError(errorMessage);
+      alert(errorMessage);
     } finally {
       setDeletingGroupId(null);
     }
