@@ -12,7 +12,7 @@ SET salary_id = NULL
 WHERE salary_id IS NOT NULL
 AND NOT EXISTS (
   SELECT 1
-  FROM salaries s
+FROM salaries s
   WHERE s.id = gm.salary_id
   AND s.user_id = gm.user_id
 );
@@ -39,9 +39,9 @@ BEGIN
     WHERE tgname = 'group_deletion_trigger'
   ) THEN
     CREATE TRIGGER group_deletion_trigger
-    BEFORE DELETE ON groups
-    FOR EACH ROW
-    EXECUTE FUNCTION handle_group_deletion();
+  BEFORE DELETE ON groups
+  FOR EACH ROW
+  EXECUTE FUNCTION handle_group_deletion();
   END IF;
 END;
 $$; 

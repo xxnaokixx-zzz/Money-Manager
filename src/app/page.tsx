@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense, MouseEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -89,6 +89,23 @@ interface ChartData {
 
 // キャッシュの有効期限（5分）
 const CACHE_EXPIRY = 5 * 60 * 1000;
+
+// リップルエフェクト用の関数
+function createRipple(e: MouseEvent<HTMLAnchorElement>) {
+  const button = e.currentTarget;
+  const circle = document.createElement('span');
+  const diameter = Math.max(button.clientWidth, button.clientHeight);
+  const radius = diameter / 2;
+  circle.style.width = circle.style.height = `${diameter}px`;
+  circle.style.left = `${e.clientX - button.getBoundingClientRect().left - radius}px`;
+  circle.style.top = `${e.clientY - button.getBoundingClientRect().top - radius}px`;
+  circle.classList.add('ripple');
+  const ripple = button.getElementsByClassName('ripple')[0];
+  if (ripple) {
+    ripple.remove();
+  }
+  button.appendChild(circle);
+}
 
 export default function Home() {
   const router = useRouter();
@@ -536,340 +553,305 @@ export default function Home() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* ヘッダー */}
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-bold text-gray-800">マイホーム</h1>
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/groups')}
-            className="inline-flex items-center px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-              />
-            </svg>
-            グループを切り替え
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div
-          className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 cursor-pointer hover:bg-gray-50"
-          onClick={() => handleNavigation('/budget')}
-        >
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">
-              予算状況
-              {authProfile && (
-                <span className="ml-2 text-sm text-gray-500">
-                  ({authProfile.name}さん)
-                </span>
-              )}
-            </h2>
-            <div className="flex space-x-2">
-              <Link
-                href="/budget"
-                className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleNavigation('/budget');
-                }}
-              >
-                <svg
-                  className="w-4 h-4 mr-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                編集
-              </Link>
-              <Link
-                href="/transactions"
-                className="inline-flex items-center px-3 py-1 text-sm bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNavigation('/transactions');
-                }}
-              >
-                <svg
-                  className="w-4 h-4 mr-1"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-                履歴
-              </Link>
-            </div>
+    <main className="min-h-screen bg-gradient-to-b from-blue-100 via-white to-blue-50 animate-fade-in">
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        {/* ヘッダー部分 */}
+        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center mb-8 gap-2 sm:gap-0">
+          <div className="flex-1 flex items-center">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-800 text-left tracking-tight animate-fade-in-up">ホーム</h1>
           </div>
-          {budgets.length === 0 ? (
-            <div className="text-center py-4 text-gray-500">
-              予算が設定されていません
-            </div>
-          ) : (
-            <div className="flex flex-col items-center">
-              <div className="relative w-48 h-48 mb-4">
-                <Suspense fallback={<div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>}>
-                  <DoughnutChart data={chartData} options={chartOptions} />
-                </Suspense>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-base font-semibold text-gray-800 mb-1">
-                      残り
-                    </div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      ¥{budgetCalculations.remainingAmount.toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-          <h2 className="text-lg font-semibold mb-4 text-slate-900">今月の収支</h2>
-          <div className="space-y-4">
-            <div>
-              <Link
-                href="/transactions"
-                className="block hover:bg-slate-50 -mx-4 px-4 py-2"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNavigation('/transactions');
-                }}
-              >
-                <div className="text-base font-semibold text-gray-900">予算（給与を含む）</div>
-                <div className="text-2xl font-bold text-slate-900">
-                  {budgets.length > 0 ? (
-                    `¥${(budgets[0].amount + otherIncome).toLocaleString()}`
-                  ) : (
-                    <span className="text-gray-500">設定されていません</span>
-                  )}
-                </div>
-              </Link>
-            </div>
-
-            <div className="border-t border-slate-200 pt-4">
-              <div>
-                <Link
-                  href="/transactions/income"
-                  className="block hover:bg-slate-50 -mx-4 px-4 py-2"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleNavigation('/transactions/income');
-                  }}
-                >
-                  <div className="text-base font-semibold text-gray-900">収入（給与以外）</div>
-                  <div className="text-2xl font-bold text-emerald-700">
-                    +¥{otherIncome.toLocaleString()}
-                  </div>
-                </Link>
-              </div>
-              <div>
-                <Link
-                  href="/transactions/expense"
-                  className="block hover:bg-slate-50 -mx-4 px-4 py-2"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleNavigation('/transactions/expense');
-                  }}
-                >
-                  <div className="text-base font-semibold text-gray-900">支出</div>
-                  <div className="text-2xl font-bold text-red-700">
-                    -¥{totalExpense.toLocaleString()}
-                  </div>
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 給与情報カード */}
-      <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center">
-              <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
-              <span className="text-sm text-slate-600">給料日設定</span>
-            </div>
+          <div className="flex flex-wrap gap-2 items-center justify-end">
             <Link
-              href="/salary"
-              className="inline-flex items-center px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              href="/groups"
+              className="inline-flex items-center px-3 py-2 bg-blue-500 text-white rounded-lg shadow hover:bg-blue-600 transition-colors text-sm font-semibold"
             >
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
-              設定
+              グループ一覧
+            </Link>
+            <Link
+              href="/transactions/income"
+              className="inline-flex items-center px-3 py-2 bg-emerald-500 text-white rounded-lg shadow-md hover:scale-105 active:scale-95 transition-all duration-200 text-sm font-semibold"
+            >
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              収入を記録
+            </Link>
+            <Link
+              href="/transactions/expense"
+              className="inline-flex items-center px-3 py-2 bg-red-500 text-white rounded-lg shadow-md hover:scale-105 active:scale-95 transition-all duration-200 text-sm font-semibold"
+            >
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+              支出を記録
             </Link>
           </div>
         </div>
-        {salary ? (
-          <div className="flex justify-between items-center gap-8">
-            <div className="flex-1 space-y-6">
-              <div>
-                <div className="text-base text-gray-500">次の給料日</div>
-                <div className="text-2xl font-bold text-slate-900">
-                  {(() => {
-                    const today = new Date();
-                    const year = today.getFullYear();
-                    const month = today.getMonth();
-                    const payday = salary.payday;
-                    let nextPayday = new Date(year, month, payday);
-                    if (today > nextPayday) {
-                      nextPayday = new Date(year, month + 1, payday);
-                    }
-                    const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    return (
-                      <>
-                        {nextPayday.getMonth() + 1}月{payday}日
-                        <span className="ml-2 text-base font-normal text-slate-600">
-                          （あと{diffDays}日）
-                        </span>
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-              <div>
-                <div className="text-base text-gray-500">給料額</div>
-                <div className="text-2xl font-bold text-slate-900">
-                  ¥{salary.amount.toLocaleString()}
-                </div>
-              </div>
-            </div>
 
-            <div className="flex-1">
-              <div className="bg-white rounded-lg p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <button
-                    onClick={() => {
-                      const newDate = new Date(displayDate);
-                      newDate.setMonth(newDate.getMonth() - 1);
-                      setDisplayDate(newDate);
-                    }}
-                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <div className="font-medium text-slate-700">
-                    {displayDate.getFullYear()}年{displayDate.getMonth() + 1}月
-                  </div>
-                  <button
-                    onClick={() => {
-                      const newDate = new Date(displayDate);
-                      newDate.setMonth(newDate.getMonth() + 1);
-                      setDisplayDate(newDate);
-                    }}
-                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="grid grid-cols-7 gap-1">
-                  {['日', '月', '火', '水', '木', '金', '土'].map((day) => (
-                    <div key={day} className="text-center text-sm text-slate-500">
-                      {day}
-                    </div>
-                  ))}
-                  {(() => {
-                    const firstDay = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
-                    const lastDay = new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0);
-                    const days = [];
-                    const today = new Date();
-
-                    // 月初めの空きマスを追加
-                    for (let i = 0; i < firstDay.getDay(); i++) {
-                      days.push(<div key={`empty-${i}`}></div>);
-                    }
-
-                    // 日付を追加
-                    for (let i = 1; i <= lastDay.getDate(); i++) {
-                      const isPayday = i === salary.payday;
-                      const isToday = i === today.getDate() &&
-                        today.getMonth() === displayDate.getMonth() &&
-                        today.getFullYear() === displayDate.getFullYear();
-
-                      days.push(
-                        <div
-                          key={i}
-                          className="relative"
-                        >
-                          <div
-                            className={`rounded-full w-8 h-8 flex items-center justify-center mx-auto
-                              ${isPayday ? 'bg-blue-500 text-white font-bold' : ''}
-                              ${isToday && !isPayday ? 'border-2 border-slate-300' : ''}
-                              ${!isPayday && !isToday ? 'text-slate-700' : ''}
-                            `}
-                          >
-                            {i}
-                          </div>
-                          {i === salary.payday && (
-                            <div className="absolute -top-1 right-1 w-2 h-2 rounded-full bg-red-500"></div>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    return days;
-                  })()}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-4">
-            <p className="text-gray-500 mb-4">給与情報が設定されていません</p>
-            <Link
-              href="/salary"
-              className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-            >
-              給与情報を設定する
-            </Link>
+        {/* エラー表示 */}
+        {error && (
+          <div className="bg-red-50 text-red-500 p-4 rounded-md mb-6 animate-fade-in-down shadow-md">
+            {error}
           </div>
         )}
+
+        {/* メインコンテンツ */}
+        <div className="space-y-6">
+          {/* 予算カード */}
+          <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-md border border-slate-200 animate-fade-in-up hover:shadow-xl transition-shadow duration-300">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
+              <div className="flex items-center">
+                <h2 className="text-lg font-semibold text-gray-800">予算</h2>
+                <span className="ml-2 text-sm text-gray-500">
+                  {selectedMonth}
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    const [year, month] = selectedMonth.split('-').map(Number);
+                    const newDate = new Date(year, month - 2, 1);
+                    setSelectedMonth(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => {
+                    const [year, month] = selectedMonth.split('-').map(Number);
+                    const newDate = new Date(year, month, 1);
+                    setSelectedMonth(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
+                  }}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+              </div>
+            ) : budgets.length > 0 ? (
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">予算額</p>
+                    <p className="text-2xl font-bold text-slate-900">
+                      ¥{budgets[0].amount.toLocaleString()}
+                    </p>
+                  </div>
+                  <Link
+                    href="/budget"
+                    className="inline-flex items-center px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                  >
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    予算を設定
+                  </Link>
+                </div>
+
+                {/* 円グラフ */}
+                <div className="flex flex-col items-center">
+                  <div className="relative w-48 h-48 mb-4">
+                    <Suspense fallback={<div className="w-48 h-48 flex items-center justify-center">読み込み中...</div>}>
+                      <DoughnutChart data={chartData} options={chartOptions} />
+                    </Suspense>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-base font-semibold text-gray-800 mb-1">
+                          残り
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900">
+                          ¥{budgetCalculations.remainingAmount.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Link
+                        href="/transactions/income"
+                        className="block hover:bg-slate-50 -mx-4 px-4 py-2"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleNavigation('/transactions/income');
+                        }}
+                      >
+                        <div className="text-base font-semibold text-gray-900">収入（給与以外）</div>
+                        <div className="text-2xl font-bold text-emerald-700">
+                          +¥{otherIncome.toLocaleString()}
+                        </div>
+                      </Link>
+                    </div>
+                    <div>
+                      <Link
+                        href="/transactions/expense"
+                        className="block hover:bg-slate-50 -mx-4 px-4 py-2"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleNavigation('/transactions/expense');
+                        }}
+                      >
+                        <div className="text-base font-semibold text-gray-900">支出</div>
+                        <div className="text-2xl font-bold text-red-700">
+                          -¥{totalExpense.toLocaleString()}
+                        </div>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500 mb-4">予算が設定されていません</p>
+                <Link
+                  href="/budget"
+                  className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  予算を設定する
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 給与情報カード */}
+          <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-slate-200">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0">
+              <h2 className="text-lg font-semibold text-gray-800">給料情報</h2>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center">
+                  <span className="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+                  <span className="text-sm text-slate-600">給料日設定</span>
+                </div>
+                <Link
+                  href="/salary"
+                  className="inline-flex items-center px-3 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                >
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  設定
+                </Link>
+              </div>
+            </div>
+            {salary ? (
+              <div className="space-y-4">
+                <div>
+                  <div className="text-sm text-gray-500">次の給料日</div>
+                  <div className="text-xl sm:text-2xl font-bold text-slate-900">
+                    {(() => {
+                      const today = new Date();
+                      const year = today.getFullYear();
+                      const month = today.getMonth();
+                      const payday = salary.payday;
+                      let nextPayday = new Date(year, month, payday);
+                      if (today > nextPayday) {
+                        nextPayday = new Date(year, month + 1, payday);
+                      }
+                      const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                      return (
+                        <>
+                          {nextPayday.getMonth() + 1}月{payday}日
+                          <span className="ml-2 text-base font-normal text-slate-600">
+                            （あと{diffDays}日）
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">給料額</div>
+                  <div className="text-xl sm:text-2xl font-bold text-slate-900">
+                    ¥{salary.amount.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-gray-500 mb-4">給与情報が設定されていません</p>
+                <Link
+                  href="/salary"
+                  className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  給与情報を設定する
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 最近の取引 */}
+          <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-slate-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-gray-800">最近の取引</h2>
+              <Link
+                href="/transactions"
+                className="text-sm text-blue-500 hover:text-blue-600"
+              >
+                すべて見る
+              </Link>
+            </div>
+            {transactions.length > 0 ? (
+              <div className="space-y-4">
+                {transactions.map((transaction) => (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer"
+                    onClick={() => handleNavigation('/transactions')}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${transaction.type === 'income' ? 'bg-emerald-100' : 'bg-red-100'
+                        }`}>
+                        <svg className={`w-5 h-5 ${transaction.type === 'income' ? 'text-emerald-600' : 'text-red-600'
+                          }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+                            transaction.type === 'income' ? 'M12 6v6m0 0v6m0-6h6m-6 0H6' : 'M20 12H4'
+                          } />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">{transaction.description}</p>
+                        <p className="text-sm text-gray-500">{transaction.categories?.name}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`font-semibold ${transaction.type === 'income' ? 'text-emerald-600' : 'text-red-600'
+                        }`}>
+                        {transaction.type === 'income' ? '+' : '-'}¥{transaction.amount.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        {new Date(transaction.date).toLocaleDateString('ja-JP', {
+                          month: 'numeric',
+                          day: 'numeric'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-gray-500">取引がありません</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -12,7 +12,7 @@ SET salary_id = NULL
 WHERE salary_id IS NOT NULL
 AND NOT EXISTS (
   SELECT 1
-  FROM salaries s
+FROM salaries s
   WHERE s.id = gm.salary_id
   AND s.user_id = gm.user_id
 );

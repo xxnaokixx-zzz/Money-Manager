@@ -26,6 +26,9 @@ interface Salary {
   payday: number;
   user_id: string;
   group_id: number;
+  base_amount?: number;
+  variable_amount?: number;
+  status: 'unconfirmed' | 'confirmed';
 }
 
 export default function SalaryPage() {
@@ -38,10 +41,23 @@ export default function SalaryPage() {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [editedAmount, setEditedAmount] = useState('');
   const [currentGroupName, setCurrentGroupName] = useState<string | null>(null);
+  const [baseAmount, setBaseAmount] = useState('');
+  const [variableAmount, setVariableAmount] = useState('');
+  const [lastMonthVariable, setLastMonthVariable] = useState<number | null>(null);
+  const [status, setStatus] = useState<'unconfirmed' | 'confirmed'>('unconfirmed');
+  const [showVariableEdit, setShowVariableEdit] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<{
+    payday: number;
+    confirmVariable: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (salary) {
       setEditedAmount(salary.amount.toString());
+      setBaseAmount(salary.base_amount?.toString() || '');
+      setVariableAmount(salary.variable_amount ? salary.variable_amount.toString() : '');
+      setStatus((salary.status as 'unconfirmed' | 'confirmed') || 'unconfirmed');
     }
   }, [salary]);
 
@@ -208,7 +224,7 @@ export default function SalaryPage() {
     initializePage();
   }, [initialized, authLoading, user]);
 
-  const handleSalaryUpdate = async (amount: number, payday: number) => {
+  const handleSalaryUpdate = async (payday: number, confirmVariable = false) => {
     try {
       setLoading(true);
       setError(null);
@@ -217,18 +233,29 @@ export default function SalaryPage() {
         throw new Error('ユーザーが認証されていません');
       }
 
-      // 入力値の検証
-      if (typeof amount !== 'number' || amount <= 0) {
-        throw new Error('給与額は0より大きい値を入力してください');
+      const base = parseInt(baseAmount);
+      const variable = variableAmount ? parseInt(variableAmount) : 0;
+      if (isNaN(base) || base <= 0) {
+        throw new Error('基本給は0より大きい値を入力してください');
       }
-
-      if (typeof payday !== 'number' || payday < 1 || payday > 31) {
+      if (payday < 1 || payday > 31) {
         throw new Error('給与日は1から31の間で入力してください');
       }
 
-      // 現在の日付を取得
       const today = new Date();
       const lastPaid = today.toISOString().split('T')[0];
+      const newStatus = confirmVariable ? 'confirmed' : 'unconfirmed';
+      const amount = base + variable;
+
+      console.log('給与更新データ:', {
+        base,
+        variable,
+        amount,
+        payday,
+        lastPaid,
+        status: newStatus,
+        confirmVariable
+      });
 
       // 既存の給与情報を確認
       const { data: existingSalary, error: existingError } = await supabase
@@ -238,75 +265,54 @@ export default function SalaryPage() {
         .maybeSingle();
 
       if (existingError) {
-        console.error('給与情報の取得に失敗:', existingError);
+        console.error('給与情報取得エラー:', existingError);
         throw new Error('給与情報の取得に失敗しました');
       }
 
-      let salaryId: number;
+      const updateData = {
+        base_amount: base,
+        variable_amount: variable,
+        amount,
+        payday,
+        last_paid: lastPaid,
+        updated_at: new Date().toISOString(),
+        status: newStatus
+      };
+
+      console.log('更新データ:', updateData);
 
       if (existingSalary) {
-        console.log('既存の給与情報を更新します:', existingSalary);
         // 既存の給与情報を更新
-        const { data: updatedSalary, error: updateError } = await supabase
+        const { error: updateError } = await supabase
           .from('salaries')
-          .update({
-            amount,
-            payday,
-            last_paid: lastPaid,
-            updated_at: new Date().toISOString(),
-            status: 'unpaid'
-          })
-          .eq('id', existingSalary.id)
-          .select()
-          .single();
+          .update(updateData)
+          .eq('id', existingSalary.id);
 
         if (updateError) {
-          console.error('給与情報の更新に失敗:', updateError);
-          throw new Error('給与情報の更新に失敗しました');
+          console.error('給与更新エラー:', updateError);
+          throw updateError;
         }
-
-        if (!updatedSalary) {
-          throw new Error('給与情報の更新に失敗しました: データが返されませんでした');
-        }
-
-        salaryId = updatedSalary.id;
-        console.log('給与情報を更新しました:', updatedSalary);
       } else {
-        console.log('新しい給与情報を作成します');
         // 新しい給与情報を作成
-        const { data: newSalary, error: insertError } = await supabase
+        const { error: insertError } = await supabase
           .from('salaries')
           .insert({
             user_id: user.id,
-            amount,
-            payday,
-            last_paid: lastPaid,
-            status: 'unpaid'
-          })
-          .select()
-          .single();
+            ...updateData
+          });
 
         if (insertError) {
-          console.error('給与情報の作成に失敗:', insertError);
-          throw new Error('給与情報の作成に失敗しました');
+          console.error('給与作成エラー:', insertError);
+          throw insertError;
         }
-
-        if (!newSalary) {
-          throw new Error('給与情報の作成に失敗しました: データが返されませんでした');
-        }
-
-        salaryId = newSalary.id;
-        console.log('新しい給与情報を作成しました:', newSalary);
       }
 
-      // 給与情報を再取得
       await fetchSalary();
+      setShowVariableEdit(false);
+      setShowConfirmDialog(false);
+      setPendingUpdate(null);
     } catch (error) {
-      console.error('Error updating salary:', {
-        error,
-        message: error instanceof Error ? error.message : '不明なエラー',
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      console.error('給与更新エラー:', error);
       setError(error instanceof Error ? error.message : '給与情報の更新に失敗しました');
     } finally {
       setLoading(false);
@@ -325,8 +331,46 @@ export default function SalaryPage() {
     if (!selectedDay) return;
 
     const amount = parseInt(editedAmount);
-    await handleSalaryUpdate(amount, selectedDay);
+    const confirmVariable = status === 'unconfirmed' && showVariableEdit;
+
+    if (confirmVariable) {
+      setPendingUpdate({ payday: selectedDay, confirmVariable });
+      setShowConfirmDialog(true);
+    } else {
+      await handleSalaryUpdate(selectedDay, false);
+    }
   };
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchLastMonthVariable = async () => {
+      const today = new Date();
+      const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+      const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}-01`;
+      const lastDayStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}-${lastDayOfMonth.getDate()}`;
+
+      const { data, error } = await supabase
+        .from('salaries')
+        .select('variable_amount')
+        .eq('user_id', user.id)
+        .eq('status', 'confirmed')
+        .gte('last_paid', lastMonthStr)
+        .lte('last_paid', lastDayStr)
+        .order('last_paid', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('前月変動分取得エラー:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setLastMonthVariable(data[0].variable_amount);
+      }
+    };
+    fetchLastMonthVariable();
+  }, [user]);
 
   if (!initialized || authLoading) {
     return (
@@ -496,7 +540,7 @@ export default function SalaryPage() {
 
             {selectedDay && (
               <div className="border-t border-gray-200 pt-6">
-                <form onSubmit={handleEditSubmit} className="space-y-4">
+                <form onSubmit={(e) => { e.preventDefault(); handleEditSubmit(e); }} className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-base font-medium text-gray-900">
                       {selectedDay}日の給与設定
@@ -511,25 +555,101 @@ export default function SalaryPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      給与額
+                      基本給
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">¥</span>
                       <input
                         type="number"
-                        value={editedAmount}
-                        onChange={(e) => setEditedAmount(e.target.value)}
+                        value={baseAmount}
+                        onChange={(e) => setBaseAmount(e.target.value)}
                         placeholder="例: 300000"
                         className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      変動分（残業など）
+                    </label>
+                    {status === 'confirmed' || showVariableEdit ? (
+                      <div className="relative flex gap-2 items-center">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">¥</span>
+                        <input
+                          type="number"
+                          value={variableAmount}
+                          onChange={(e) => setVariableAmount(e.target.value)}
+                          placeholder="例: 50000"
+                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {status !== 'confirmed' && (
+                          <button
+                            type="button"
+                            className="ml-2 px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs"
+                            onClick={() => {
+                              setShowVariableEdit(false);
+                              setVariableAmount('');
+                            }}
+                          >
+                            キャンセル
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-700 font-semibold">
+                          {lastMonthVariable !== null ? `¥${lastMonthVariable.toLocaleString()}` : '未設定'}
+                        </span>
+                        <span className="text-xs text-gray-500">（前月実績から予想）</span>
+                        <button
+                          type="button"
+                          className="ml-2 px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs"
+                          onClick={() => setShowVariableEdit(true)}
+                        >
+                          明細確認後に更新
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </form>
               </div>
             )}
           </div>
         </div>
+
+        {showConfirmDialog && pendingUpdate && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                給与確定の確認
+              </h3>
+              <p className="text-gray-600 mb-6">
+                変動分を含めた給与を確定しますか？
+                確定後は予算に自動反映されます。
+              </p>
+              <div className="flex justify-end gap-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmDialog(false);
+                    setPendingUpdate(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSalaryUpdate(pendingUpdate.payday, pendingUpdate.confirmVariable)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                >
+                  確定する
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </AuthGuard>
   );
