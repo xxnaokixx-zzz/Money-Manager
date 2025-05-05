@@ -1,24 +1,12 @@
 'use client';
 
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase-browser';
 import AuthGuard from '@/components/AuthGuard';
 import { useAuth } from '@/contexts/AuthContext';
-
-interface Group {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
-interface GroupMember {
-  group_id: number;
-  role: string;
-  salary_id: number | null;
-  groups: Group;
-}
 
 interface Salary {
   id: number;
@@ -124,17 +112,41 @@ export default function SalaryPage() {
     try {
       setLoading(true);
 
+      if (!editingSalary) {
+        throw new Error('編集する給与情報が選択されていません');
+      }
+
+      const updateData: {
+        amount: number;
+        payday: number;
+        is_paid?: boolean;
+        last_paid?: string;
+        special_amount?: number | null;
+      } = {
+        amount: Number(editingSalary.amount),
+        payday: Number(editingSalary.payday)
+      };
+
+      // オプショナルなフィールドを条件付きで追加
+      if ('is_paid' in editingSalary) {
+        updateData.is_paid = editingSalary.is_paid;
+      }
+      if ('last_paid' in editingSalary) {
+        updateData.last_paid = editingSalary.last_paid;
+      }
+      if ('special_amount' in editingSalary) {
+        updateData.special_amount = editingSalary.special_amount ? Number(editingSalary.special_amount) : null;
+      }
+
       const { error } = await supabase
         .from('salaries')
-        .update({
-          amount: Number(editingSalary?.amount),
-          payday: Number(editingSalary?.payday),
-          special_amount: editingSalary?.special_amount ? Number(editingSalary.special_amount) : null,
-          is_paid: editingSalary?.is_paid
-        })
+        .update(updateData)
         .eq('id', salary.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(`給与の更新に失敗しました: ${error.message}`);
+      }
 
       await fetchSalaries();
       setEditingSalary(null);
@@ -399,7 +411,22 @@ export default function SalaryPage() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-lg p-6 max-w-md w-full">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">給与を編集</h3>
-              <form onSubmit={(e) => { e.preventDefault(); handleEditSalary(editingSalary); }} className="space-y-4">
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editingSalary) return;
+
+                // バリデーション
+                if (!editingSalary.amount || editingSalary.amount <= 0) {
+                  setError('有効な給与額を入力してください');
+                  return;
+                }
+                if (!editingSalary.payday || editingSalary.payday < 1 || editingSalary.payday > 31) {
+                  setError('有効な支払い日を選択してください');
+                  return;
+                }
+
+                await handleEditSalary(editingSalary);
+              }} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     給与額

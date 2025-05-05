@@ -17,7 +17,9 @@ export default function Header() {
   }, []);
 
   const menuItems: { href: string; label: string }[] = [
-    // 指定されたリンクを削除
+    { href: '/transactions/income', label: '収入' },
+    { href: '/transactions/expense', label: '支出' },
+    { href: '/salary', label: '給与設定' }
   ];
 
   const handleNavigation = (href: string) => {
