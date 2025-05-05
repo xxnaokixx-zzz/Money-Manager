@@ -39,6 +39,7 @@ export default function GroupBudgetPage() {
   const [totalIncome, setTotalIncome] = useState(0);
   const [salaryIncome, setSalaryIncome] = useState(0);
   const [otherIncome, setOtherIncome] = useState(0);
+  const [salaryStatus, setSalaryStatus] = useState<'unconfirmed' | 'confirmed' | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
