@@ -16,12 +16,6 @@ export default function Header() {
     setMounted(true);
   }, []);
 
-  const menuItems: { href: string; label: string }[] = [
-    { href: '/transactions/income', label: '収入' },
-    { href: '/transactions/expense', label: '支出' },
-    { href: '/salary', label: '給与設定' }
-  ];
-
   const handleNavigation = (href: string) => {
     setIsMenuOpen(false);
     router.push(href);
@@ -91,17 +85,6 @@ export default function Header() {
           {user && (
             <>
               {/* デスクトップ用ナビゲーション */}
-              <nav className="hidden md:flex items-center space-x-6">
-                {menuItems.map((item) => (
-                  <button
-                    key={item.href}
-                    onClick={() => handleNavigation(item.href)}
-                    className="text-gray-600 hover:text-gray-900"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </nav>
             </>
           )}
 
@@ -158,15 +141,6 @@ export default function Header() {
       {isMenuOpen && user && (
         <div className="md:hidden bg-white border-t">
           <nav className="px-4 py-2">
-            {menuItems.map((item) => (
-              <button
-                key={item.href}
-                onClick={() => handleNavigation(item.href)}
-                className="block w-full text-left py-3 text-gray-600 hover:text-gray-900 border-b last:border-b-0"
-              >
-                {item.label}
-              </button>
-            ))}
           </nav>
         </div>
       )}
