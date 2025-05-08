@@ -47,11 +47,28 @@ export default function SalaryPage() {
         return;
       }
 
+      // URLから月のパラメータを取得
+      const searchParams = new URLSearchParams(window.location.search);
+      const month = searchParams.get('month') || new Date().toISOString().slice(0, 7);
+      const [year, monthNum] = month.split('-').map(Number);
+      const firstDay = `${year}-${String(monthNum).padStart(2, '0')}-01`;
+      const lastDay = new Date(year, monthNum, 0).getDate();
+      const lastDayStr = `${year}-${String(monthNum).padStart(2, '0')}-${lastDay}`;
+
+      console.log('Fetching salaries for month:', {
+        month,
+        firstDay,
+        lastDayStr
+      });
+
       const { data: salaryData, error: salaryError } = await supabase
         .from('salaries')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .gte('last_paid', firstDay)
+        .lte('last_paid', lastDayStr)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       if (salaryError) {
         throw new Error(`給与情報の取得に失敗しました: ${salaryError.message}`);
@@ -269,15 +286,6 @@ export default function SalaryPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <button
-                          onClick={() => handleTogglePaid(salary)}
-                          className={`px-3 py-1 rounded-full text-sm ${salary.is_paid
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                            }`}
-                        >
-                          {salary.is_paid ? '入金済み' : '未入金'}
-                        </button>
-                        <button
                           onClick={() => setEditingSalary(salary)}
                           className="p-2 text-gray-600 hover:text-gray-900"
                         >
@@ -299,17 +307,11 @@ export default function SalaryPage() {
                         </button>
                       </div>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-4">
+                    <div className="mt-4">
                       <div>
                         <p className="text-sm text-gray-600">支払い日</p>
                         <p className="text-base font-medium text-gray-900">
                           毎月 {salary.payday} 日
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-600">最終入金日</p>
-                        <p className="text-base font-medium text-gray-900">
-                          {new Date(salary.last_paid).toLocaleDateString('ja-JP')}
                         </p>
                       </div>
                     </div>

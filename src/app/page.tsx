@@ -265,19 +265,9 @@ export default function Home() {
 
       // 月の最初の日と最後の日を計算
       const [year, month] = selectedMonth.split('-').map(Number);
-      // 次の月の0日目 = 今月の最終日
       const lastDay = new Date(year, month, 0).getDate();
       const firstDay = `${selectedMonth}-01`;
       const lastDayStr = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`;
-
-      console.log('Date range calculated:', {
-        year,
-        month,
-        firstDay,
-        lastDay,
-        lastDayStr,
-        currentDate: new Date().toISOString().split('T')[0]
-      });
 
       // データ取得を並列実行
       const [transactionsData, budgetsData, salaryData, userData] = await Promise.all([
@@ -305,8 +295,9 @@ export default function Home() {
           .limit(1),
         supabase
           .from('salaries')
-          .select('id, amount, payday, last_paid, user_id')
+          .select('id, amount, payday, last_paid, user_id, created_at')
           .eq('user_id', user.id)
+          .eq('last_paid', firstDay)
           .single(),
         supabase
           .from('users')
@@ -320,7 +311,14 @@ export default function Home() {
         data: salaryData.data,
         error: salaryData.error,
         status: salaryData.status,
-        statusText: salaryData.statusText
+        statusText: salaryData.statusText,
+        month: selectedMonth,
+        firstDay,
+        lastDayStr,
+        lastPaid: salaryData.data?.last_paid,
+        payday: salaryData.data?.payday,
+        amount: salaryData.data?.amount,
+        created_at: salaryData.data?.created_at
       });
 
       // 各データの取得結果を詳細にログ出力
@@ -642,7 +640,7 @@ export default function Home() {
                     </p>
                   </div>
                   <Link
-                    href="/budget"
+                    href={`/budget?month=${selectedMonth}`}
                     className="inline-flex items-center px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
                   >
                     <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -710,7 +708,7 @@ export default function Home() {
               <div className="text-center py-8">
                 <p className="text-gray-500 mb-4">予算が設定されていません</p>
                 <Link
-                  href="/budget"
+                  href={`/budget?month=${selectedMonth}`}
                   className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                 >
                   予算を設定する
@@ -729,7 +727,7 @@ export default function Home() {
                   <span className="text-sm text-slate-600">給料日設定</span>
                 </div>
                 <Link
-                  href="/salary"
+                  href={`/salary?month=${selectedMonth}`}
                   className="inline-flex items-center px-3 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600"
                 >
                   <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -742,27 +740,12 @@ export default function Home() {
             {salary ? (
               <div className="space-y-4">
                 <div>
-                  <div className="text-sm text-gray-500">次の給料日</div>
+                  <div className="text-sm text-gray-500">給料日</div>
                   <div className="text-xl sm:text-2xl font-bold text-slate-900">
                     {(() => {
-                      const today = new Date();
-                      const year = today.getFullYear();
-                      const month = today.getMonth();
+                      const [year, month] = selectedMonth.split('-').map(Number);
                       const payday = salary.payday;
-                      let nextPayday = new Date(year, month, payday);
-                      if (today > nextPayday) {
-                        nextPayday = new Date(year, month + 1, payday);
-                      }
-                      const diffTime = nextPayday.getTime() - today.setHours(0, 0, 0, 0);
-                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                      return (
-                        <>
-                          {nextPayday.getMonth() + 1}月{payday}日
-                          <span className="ml-2 text-base font-normal text-slate-600">
-                            （あと{diffDays}日）
-                          </span>
-                        </>
-                      );
+                      return `${year}/${month}/${payday}`;
                     })()}
                   </div>
                 </div>
@@ -777,7 +760,7 @@ export default function Home() {
               <div className="text-center py-4">
                 <p className="text-gray-500 mb-4">給与情報が設定されていません</p>
                 <Link
-                  href="/salary"
+                  href={`/salary?month=${selectedMonth}`}
                   className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                 >
                   給与情報を設定する

@@ -30,6 +30,12 @@ export default function BudgetPage() {
   const [selectedFixedCategoryIds, setSelectedFixedCategoryIds] = useState<string[]>([]);
   const [categoryAmounts, setCategoryAmounts] = useState<{ [catId: string]: number }>({});
   const searchParams = useSearchParams();
+  const handleMonthChange = (newMonth: string) => {
+    const formattedMonth = newMonth.length === 10 ? newMonth.slice(0, 7) : newMonth;
+    setSelectedMonth(formattedMonth);
+    router.push(`/budget?month=${formattedMonth}`, { scroll: false });
+  };
+
   const initialMonth = (() => {
     const monthParam = searchParams.get('month');
     if (monthParam) {
@@ -40,22 +46,29 @@ export default function BudgetPage() {
   })();
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
 
+  // URLパラメータの変更を監視
   useEffect(() => {
-    setLoading(true);
-  }, [selectedMonth]);
+    const monthParam = searchParams.get('month');
+    if (monthParam) {
+      const formatted = monthParam.length === 10 ? monthParam.slice(0, 7) : monthParam;
+      if (formatted !== selectedMonth) {
+        setSelectedMonth(formatted);
+      }
+    }
+  }, [searchParams, selectedMonth]);
 
+  // 月が変更されたときのデータ取得
   useEffect(() => {
-    let isMounted = true;
     const fetchData = async () => {
-      console.log('fetchData called. selectedMonth:', selectedMonth, 'URL month:', searchParams.get('month'));
-      if (!isMounted) return;
       try {
+        setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
           router.push('/login');
-          if (isMounted) setLoading(false);
+          setLoading(false);
           return;
         }
+
         // 給与（選択月の給与）を取得
         const monthDate = new Date(`${selectedMonth}-01`);
         const formattedDate = monthDate.toISOString().split('T')[0];
@@ -65,8 +78,9 @@ export default function BudgetPage() {
           .eq('user_id', user.id)
           .eq('last_paid', formattedDate)
           .maybeSingle();
-        console.log('salaryRow:', salaryRow, 'formattedDate:', formattedDate);
+
         setSalary(salaryRow?.amount || 0);
+
         // 予算を取得
         const { data: budgetData, error: budgetError } = await supabase
           .from('budgets')
@@ -74,7 +88,6 @@ export default function BudgetPage() {
           .eq('user_id', user.id)
           .eq('month', formattedDate)
           .single();
-        console.log('budgetData:', budgetData, 'formattedDate:', formattedDate);
 
         if (budgetError && budgetError.code === 'PGRST116') {
           // 予算が存在しない場合は新規作成
@@ -95,16 +108,13 @@ export default function BudgetPage() {
         } else {
           setBudget(budgetData);
         }
-        // 固定費カテゴリのみ取得
+
+        // 固定費カテゴリを取得
         const { data: budgetCatData } = await supabase
           .from('budget_categories')
           .select('category_id, amount')
           .eq('budget_id', budgetData?.id || 0);
-        const { data: categoryData } = await supabase
-          .from('categories')
-          .select('id, name, type')
-          .in('name', ['住居費', '光熱費', '通信費', '交通費']);
-        // DBから取得した固定費カテゴリIDと金額で初期化
+
         if (budgetCatData) {
           setSelectedFixedCategoryIds(budgetCatData.map(bc => String(bc.category_id)));
           const initialAmounts: { [catId: string]: number } = {};
@@ -116,26 +126,15 @@ export default function BudgetPage() {
           setSelectedFixedCategoryIds([]);
           setCategoryAmounts({});
         }
-        const fixed = (categoryData || []).map(cat => {
-          const found = (budgetCatData || []).find(bc => bc.category_id === cat.id);
-          console.log('cat.id:', cat.id, typeof cat.id, 'found.category_id:', found ? found.category_id : undefined, found ? typeof found.category_id : undefined, 'found:', found);
-          return {
-            category_id: cat.id,
-            category_name: cat.name,
-            category_type: cat.type,
-            amount: found ? found.amount : 0
-          };
-        });
       } catch (error) {
-        if (!isMounted) return;
         setError(error instanceof Error ? error.message : 'データ取得に失敗しました');
       } finally {
-        if (isMounted) setLoading(false);
+        setLoading(false);
       }
     };
+
     fetchData();
-    return () => { isMounted = false; };
-  }, [router, selectedMonth]);
+  }, [selectedMonth, router]);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -148,17 +147,6 @@ export default function BudgetPage() {
     };
     fetchCategories();
   }, []);
-
-  useEffect(() => {
-    const monthParam = searchParams.get('month');
-    if (monthParam) {
-      // YYYY-MM-DD形式ならYYYY-MMに変換
-      const formatted = monthParam.length === 10 ? monthParam.slice(0, 7) : monthParam;
-      if (formatted !== selectedMonth) {
-        setSelectedMonth(formatted);
-      }
-    }
-  }, [searchParams]);
 
   const handleToggleFixedCategory = (catId: string) => {
     setSelectedFixedCategoryIds(ids =>
@@ -200,7 +188,6 @@ export default function BudgetPage() {
     });
     const fixedTotal = validCategoryIds.reduce((sum, catId) => sum + (categoryAmounts[catId] || 0), 0);
     const freeBudget = salary - fixedTotal;
-    console.log('登録時 salary:', salary, 'fixedTotal:', fixedTotal, 'freeBudget:', freeBudget);
     await supabase
       .from('budgets')
       .update({ amount: freeBudget })
@@ -218,6 +205,8 @@ export default function BudgetPage() {
         ], { onConflict: 'budget_id,category_id' });
     }
     alert('予算を登録しました！');
+    // 予算登録後、同じ月の予算ページに遷移
+    router.push(`/budget?month=${selectedMonth}`, { scroll: false });
   };
 
   if (loading) {
