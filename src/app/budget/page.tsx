@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase-browser';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Budget {
@@ -26,17 +26,28 @@ export default function BudgetPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [salary, setSalary] = useState<number>(0);
-  const [fixedCategories, setFixedCategories] = useState<BudgetCategory[]>([]);
-  const [isEditingCategory, setIsEditingCategory] = useState<number | null>(null);
-  const [editedCategoryAmount, setEditedCategoryAmount] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState(() => {
+  const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
+  const [selectedFixedCategoryIds, setSelectedFixedCategoryIds] = useState<string[]>([]);
+  const [categoryAmounts, setCategoryAmounts] = useState<{ [catId: string]: number }>({});
+  const searchParams = useSearchParams();
+  const initialMonth = (() => {
+    const monthParam = searchParams.get('month');
+    if (monthParam) {
+      return monthParam.length === 10 ? monthParam.slice(0, 7) : monthParam;
+    }
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  })();
+  const [selectedMonth, setSelectedMonth] = useState(initialMonth);
+
+  useEffect(() => {
+    setLoading(true);
+  }, [selectedMonth]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
+      console.log('fetchData called. selectedMonth:', selectedMonth, 'URL month:', searchParams.get('month'));
       if (!isMounted) return;
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -45,25 +56,45 @@ export default function BudgetPage() {
           if (isMounted) setLoading(false);
           return;
         }
-        // 給与（今月分）を取得
+        // 給与（選択月の給与）を取得
+        const monthDate = new Date(`${selectedMonth}-01`);
+        const formattedDate = monthDate.toISOString().split('T')[0];
         const { data: salaryRow } = await supabase
           .from('salaries')
           .select('amount')
           .eq('user_id', user.id)
-          .order('last_paid', { ascending: false })
-          .limit(1)
+          .eq('last_paid', formattedDate)
           .maybeSingle();
+        console.log('salaryRow:', salaryRow, 'formattedDate:', formattedDate);
         setSalary(salaryRow?.amount || 0);
         // 予算を取得
-        const monthDate = new Date(`${selectedMonth}-01`);
-        const formattedDate = monthDate.toISOString().split('T')[0];
-        const { data: budgetData } = await supabase
+        const { data: budgetData, error: budgetError } = await supabase
           .from('budgets')
           .select('*')
           .eq('user_id', user.id)
           .eq('month', formattedDate)
           .single();
-        setBudget(budgetData);
+        console.log('budgetData:', budgetData, 'formattedDate:', formattedDate);
+
+        if (budgetError && budgetError.code === 'PGRST116') {
+          // 予算が存在しない場合は新規作成
+          const { data: newBudget, error: createError } = await supabase
+            .from('budgets')
+            .insert([{
+              user_id: user.id,
+              month: formattedDate,
+              amount: 0
+            }])
+            .select()
+            .single();
+
+          if (createError) throw createError;
+          setBudget(newBudget);
+        } else if (budgetError) {
+          throw budgetError;
+        } else {
+          setBudget(budgetData);
+        }
         // 固定費カテゴリのみ取得
         const { data: budgetCatData } = await supabase
           .from('budget_categories')
@@ -73,8 +104,21 @@ export default function BudgetPage() {
           .from('categories')
           .select('id, name, type')
           .in('name', ['住居費', '光熱費', '通信費', '交通費']);
+        // DBから取得した固定費カテゴリIDと金額で初期化
+        if (budgetCatData) {
+          setSelectedFixedCategoryIds(budgetCatData.map(bc => String(bc.category_id)));
+          const initialAmounts: { [catId: string]: number } = {};
+          budgetCatData.forEach(bc => {
+            initialAmounts[String(bc.category_id)] = bc.amount;
+          });
+          setCategoryAmounts(initialAmounts);
+        } else {
+          setSelectedFixedCategoryIds([]);
+          setCategoryAmounts({});
+        }
         const fixed = (categoryData || []).map(cat => {
           const found = (budgetCatData || []).find(bc => bc.category_id === cat.id);
+          console.log('cat.id:', cat.id, typeof cat.id, 'found.category_id:', found ? found.category_id : undefined, found ? typeof found.category_id : undefined, 'found:', found);
           return {
             category_id: cat.id,
             category_name: cat.name,
@@ -82,7 +126,6 @@ export default function BudgetPage() {
             amount: found ? found.amount : 0
           };
         });
-        setFixedCategories(fixed);
       } catch (error) {
         if (!isMounted) return;
         setError(error instanceof Error ? error.message : 'データ取得に失敗しました');
@@ -94,51 +137,86 @@ export default function BudgetPage() {
     return () => { isMounted = false; };
   }, [router, selectedMonth]);
 
-  const handleEditCategory = (categoryId: number, amount: number) => {
-    setIsEditingCategory(categoryId);
-    setEditedCategoryAmount(String(amount));
+  useEffect(() => {
+    const fetchCategories = async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('id, name, type')
+        .eq('type', 'expense')
+        .order('name');
+      if (!error) setCategories(data || []);
+    };
+    fetchCategories();
+  }, []);
+
+  useEffect(() => {
+    const monthParam = searchParams.get('month');
+    if (monthParam) {
+      // YYYY-MM-DD形式ならYYYY-MMに変換
+      const formatted = monthParam.length === 10 ? monthParam.slice(0, 7) : monthParam;
+      if (formatted !== selectedMonth) {
+        setSelectedMonth(formatted);
+      }
+    }
+  }, [searchParams]);
+
+  const handleToggleFixedCategory = (catId: string) => {
+    setSelectedFixedCategoryIds(ids =>
+      ids.includes(catId) ? ids.filter(id => id !== catId) : [...ids, catId]
+    );
   };
 
-  const handleSaveCategory = async (categoryId: number) => {
-    if (!budget) return;
-    await supabase
-      .rpc('update_budget_category', {
-        p_budget_id: budget.id,
-        p_category_id: categoryId,
-        p_amount: Number(editedCategoryAmount)
-      });
-    setIsEditingCategory(null);
-    setEditedCategoryAmount('');
-    // 再取得
-    const { data: budgetCatData } = await supabase
-      .from('budget_categories')
-      .select('category_id, amount')
-      .eq('budget_id', budget.id);
-    const { data: categoryData } = await supabase
-      .from('categories')
-      .select('id, name, type')
-      .in('name', ['住居費', '光熱費', '通信費', '交通費']);
-    const fixed = (categoryData || []).map(cat => {
-      const found = (budgetCatData || []).find(bc => bc.category_id === cat.id);
-      return {
-        category_id: cat.id,
-        category_name: cat.name,
-        category_type: cat.type,
-        amount: found ? found.amount : 0
-      };
+  const handleAmountChange = (catId: string, value: string) => {
+    setCategoryAmounts(amts => ({ ...amts, [catId]: Number(value) }));
+  };
+
+  const handleRemoveFixedCategory = (catId: string) => {
+    setSelectedFixedCategoryIds(ids => ids.filter(id => id !== catId));
+    setCategoryAmounts(amts => {
+      const newAmts = { ...amts };
+      delete newAmts[catId];
+      return newAmts;
     });
-    setFixedCategories(fixed);
   };
 
-  const fixedTotal = fixedCategories.reduce((sum, cat) => sum + cat.amount, 0);
+  const fixedTotal = selectedFixedCategoryIds.reduce(
+    (sum, catId) => sum + (categoryAmounts[catId] || 0), 0
+  );
   const freeBudget = salary - fixedTotal;
 
   const handleRegisterBudget = async () => {
     if (!budget) return;
+    // 金額未入力（0または空欄）のカテゴリーは自動で外す
+    const validCategoryIds = selectedFixedCategoryIds.filter(catId => categoryAmounts[catId] && categoryAmounts[catId] > 0);
+    setSelectedFixedCategoryIds(validCategoryIds);
+    setCategoryAmounts(amts => {
+      const newAmts = { ...amts };
+      Object.keys(newAmts).forEach(catId => {
+        if (!validCategoryIds.includes(catId)) {
+          delete newAmts[catId];
+        }
+      });
+      return newAmts;
+    });
+    const fixedTotal = validCategoryIds.reduce((sum, catId) => sum + (categoryAmounts[catId] || 0), 0);
+    const freeBudget = salary - fixedTotal;
+    console.log('登録時 salary:', salary, 'fixedTotal:', fixedTotal, 'freeBudget:', freeBudget);
     await supabase
       .from('budgets')
       .update({ amount: freeBudget })
       .eq('id', budget.id);
+    // budget_categoriesも更新
+    for (const catId of validCategoryIds) {
+      await supabase
+        .from('budget_categories')
+        .upsert([
+          {
+            budget_id: budget.id,
+            category_id: Number(catId),
+            amount: categoryAmounts[catId]
+          }
+        ], { onConflict: 'budget_id,category_id' });
+    }
     alert('予算を登録しました！');
   };
 
@@ -154,7 +232,12 @@ export default function BudgetPage() {
         <div className="p-6 space-y-6">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="text-sm text-gray-600">今月の給与（自動取得）</span>
+              {(() => {
+                const [year, month] = selectedMonth.split('-');
+                return (
+                  <span className="text-sm text-gray-600">{`${year}年${Number(month)}月の給与（自動取得）`}</span>
+                );
+              })()}
               <span className="text-xl font-bold text-emerald-600">¥{salary.toLocaleString()}</span>
             </div>
             <div className="flex justify-between">
@@ -167,45 +250,62 @@ export default function BudgetPage() {
             </div>
           </div>
           <div className="pt-4 border-t border-gray-200">
-            <div className="text-sm font-medium text-gray-700 mb-2">固定費の内訳</div>
-            <div className="space-y-4">
-              {fixedCategories.map((category) => (
-                <div key={category.category_id} className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="text-sm text-gray-600">{category.category_name}</div>
-                    {isEditingCategory === category.category_id ? (
-                      <div className="flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">¥</span>
-                          <input
-                            type="number"
-                            value={editedCategoryAmount}
-                            onChange={(e) => setEditedCategoryAmount(e.target.value)}
-                            className="block w-full rounded-md border-gray-300 pl-8 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                            placeholder="金額を入力"
-                          />
-                        </div>
-                        <button
-                          onClick={() => handleSaveCategory(category.category_id)}
-                          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                        >保存</button>
-                        <button
-                          onClick={() => { setIsEditingCategory(null); setEditedCategoryAmount(''); }}
-                          className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                        >キャンセル</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <div className="text-xl font-bold text-gray-900">¥{category.amount.toLocaleString()}</div>
-                        <button
-                          onClick={() => handleEditCategory(category.category_id, category.amount)}
-                          className="text-sm text-blue-600 hover:text-blue-700"
-                        >編集</button>
-                      </div>
-                    )}
+            <div className="text-sm font-medium text-gray-700 mb-2">固定費に含めるカテゴリーを選択</div>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {categories.map(cat => {
+                const selected = selectedFixedCategoryIds.includes(cat.id);
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => handleToggleFixedCategory(cat.id)}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition
+                      ${selected
+                        ? 'bg-blue-600 text-white shadow'
+                        : 'bg-gray-100 text-gray-900 border border-gray-300'}
+                      focus:outline-none focus:ring-2 focus:ring-blue-400`}
+                    style={{ minWidth: 80, minHeight: 40, touchAction: 'manipulation' }}
+                  >
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="space-y-3">
+              {selectedFixedCategoryIds.map(catId => {
+                const cat = categories.find(c => String(c.id) === String(catId));
+                if (!cat) return null;
+                return (
+                  <div
+                    key={catId}
+                    className="flex items-center bg-white border border-blue-200 rounded-xl px-4 py-3 shadow-sm"
+                  >
+                    <div className="flex-1 text-blue-700 font-bold text-base">{cat.name}</div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-gray-700">¥</span>
+                      <input
+                        type="number"
+                        value={categoryAmounts[catId] || ''}
+                        onChange={e => handleAmountChange(catId, e.target.value)}
+                        className="w-28 rounded-md border-gray-300 px-2 py-1 text-left text-gray-900 focus:border-blue-500 focus:ring-blue-500"
+                        placeholder="金額"
+                        min={0}
+                      />
+                      <span className="ml-1 text-gray-700">円</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFixedCategory(catId)}
+                      className="ml-4 p-1 rounded-full hover:bg-red-100 transition"
+                      aria-label="削除"
+                    >
+                      <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           <div className="pt-4 flex flex-col items-end">
